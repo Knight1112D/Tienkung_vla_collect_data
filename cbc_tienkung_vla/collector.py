@@ -48,6 +48,7 @@ class VLACollectNode(Node):
         self.running = True
         self.is_recording = False
         self.pending_start = False
+        self.pending_start_sec = 0.0
         self.current_dir: Optional[Path] = None
         self.last_saved_dir: Optional[Path] = None
         self.frame_count = 0
@@ -275,6 +276,8 @@ class VLACollectNode(Node):
                 return
             missing = self.missing_streams()
             if missing:
+                if not self.pending_start:
+                    self.pending_start_sec = time.time()
                 self.pending_start = True
                 self._log_waiting_streams(missing, force=True)
                 return
@@ -284,6 +287,7 @@ class VLACollectNode(Node):
         with self.lock:
             if self.pending_start and not self.is_recording:
                 self.pending_start = False
+                self.pending_start_sec = 0.0
                 print("\n已取消等待启动。\n")
                 return
             if not self.is_recording:
@@ -339,6 +343,7 @@ class VLACollectNode(Node):
         self.frame_count = 0
         self._reset_histories()
         self.pending_start = False
+        self.pending_start_sec = 0.0
         self.is_recording = True
         print(f"\n开始采集... (帧率: {self.args.target_hz:.1f}Hz, 目录: {self.current_dir})")
 
@@ -356,6 +361,8 @@ class VLACollectNode(Node):
         """等待启动时自动恢复缺失的相机流。"""
         image_missing = [name for name in missing if name in {"head", "hand_left", "hand_right"}]
         if not image_missing or not self.args.auto_recover_streams:
+            return
+        if self.pending_start_sec > 0.0 and now - self.pending_start_sec < self.args.recover_after_sec:
             return
         if now - self.last_recover_sec < self.args.recover_interval_sec:
             return
@@ -493,6 +500,7 @@ class VLACollectNode(Node):
     def cleanup(self) -> None:
         self.running = False
         self.pending_start = False
+        self.pending_start_sec = 0.0
         if self.is_recording:
             self.stop_recording()
         self.save_thread.join(timeout=1.0)
@@ -530,6 +538,7 @@ def build_arg_parser(
     parser.add_argument("--left-hand-state-topic", default="/inspire_hand/state/left_hand", help="左灵巧手 state 话题")
     parser.add_argument("--right-hand-state-topic", default="/inspire_hand/state/right_hand", help="右灵巧手 state 话题")
     parser.add_argument("--auto-recover-streams", action=argparse.BooleanOptionalAction, default=True, help="等待启动时自动恢复缺失的相机流")
+    parser.add_argument("--recover-after-sec", type=float, default=8.0, help="等待启动超过该秒数仍缺相机流时才自动恢复")
     parser.add_argument("--recover-interval-sec", type=float, default=20.0, help="自动恢复相机流的最小间隔秒数")
     parser.add_argument("--extra-joint-state-topic", dest="extra_joint_state_topics", type=parse_named_topic, action="append", default=[], help=argparse.SUPPRESS)
     return parser

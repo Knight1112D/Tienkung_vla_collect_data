@@ -53,6 +53,22 @@ python3 scripts/dual_hands_collect.py --target-hz 20
 
 4. 当前默认流程是在上位机采集并直接落盘，不再需要从 n3 上传数据。
 
+如果上位机订阅相机流出现长时间阻塞，改用 n2 的 tmpfs 采集：
+
+```bash
+ssh tienkung
+ssh n2
+cd /dev/shm/cbc_tienkung2.0_vla_collect_data
+bash scripts/n2_dual_hands_collect.sh --target-hz 20
+```
+
+采完后从 n2 上传到上位机并删除 n2 本地数据：
+
+```bash
+cd /dev/shm/cbc_tienkung2.0_vla_collect_data
+bash scripts/upload_n2_recorded_data.sh
+```
+
 ## D405 USB 恢复
 
 n3 上的 D405 偶尔会出现 `No RealSense devices were found`、`rs-enumerate-devices` 无设备、或者 `lsusb` 有设备但相机节点仍找不到设备的情况。优先使用下面的软件重置流程，不需要机器人动作。
@@ -109,6 +125,8 @@ python3 scripts/view_vla_cameras.py --save-preview /tmp/vla_preview.jpg
 - `scripts/gripper_vla_collect.py`：加爪/夹爪采集程序模板，内部有独立 `main()`，后续确认爪子话题后直接运行这个文件。
 - `scripts/view_vla_cameras.py`：三路相机预览脚本，用于采集前确认视角。
 - `scripts/recover_vla_streams.sh`：相机流自动恢复脚本，采集器等待启动时可自动调用。
+- `scripts/n2_dual_hands_collect.sh`：n2 tmpfs 采集入口，自动 source n2 的 `bodyctrl_msgs` 环境。
+- `scripts/upload_n2_recorded_data.sh`：把 n2 tmpfs 中的采集数据上传到上位机 `dual_hands/` 并删除本地副本。
 - `launch/vla_camera_nodes.launch.py`：推荐的一键启动入口，用独立进程启动每个远端相机节点。
 - `scripts/start_vla_nodes.sh`：兼容包装，内部调用 `launch/vla_camera_nodes.launch.py`。
 - `scripts/stop_vla_nodes.sh`：停止相机节点，便于重新启动。
@@ -153,6 +171,8 @@ D405 默认沿用旧项目中已经稳定验证过的 h264 图像话题。采集
 bash scripts/recover_vla_streams.sh head
 bash scripts/recover_vla_streams.sh hand_left hand_right
 ```
+
+自动恢复会先等待一小段时间，避免相机刚启动、缓存尚未到齐时误重启。
 
 ## 加爪/夹爪采集
 

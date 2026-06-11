@@ -47,6 +47,22 @@ Data is saved by default to:
 
 The default workflow records directly on the upper computer, so no n3 upload step is required.
 
+If camera subscription on the upper computer stalls for a long time, record on n2 tmpfs instead:
+
+```bash
+ssh tienkung
+ssh n2
+cd /dev/shm/cbc_tienkung2.0_vla_collect_data
+bash scripts/n2_dual_hands_collect.sh --target-hz 20
+```
+
+After recording, upload the n2 data to the upper computer and remove the local n2 copy:
+
+```bash
+cd /dev/shm/cbc_tienkung2.0_vla_collect_data
+bash scripts/upload_n2_recorded_data.sh
+```
+
 ## Camera Startup And Shutdown
 
 Start all camera nodes:
@@ -201,6 +217,8 @@ New image or state messages replace the previous cache. If no newer image arrive
 
 If `head`, `hand_left`, or `hand_right` is missing after pressing `1`, the recorder periodically calls `scripts/recover_vla_streams.sh` to recover the missing camera stream. The script can also be run manually.
 
+Automatic recovery waits for a short grace period first, so newly starting camera streams are not restarted unnecessarily.
+
 ## Project Layout
 
 - `cbc_tienkung_vla/collector.py`: shared fixed-rate collection logic
@@ -208,6 +226,8 @@ If `head`, `hand_left`, or `hand_right` is missing after pressing `1`, the recor
 - `scripts/gripper_vla_collect.py`: gripper collection template
 - `scripts/view_vla_cameras.py`: three-camera preview tool
 - `scripts/recover_vla_streams.sh`: camera-stream recovery helper used by the recorder while waiting to start
+- `scripts/n2_dual_hands_collect.sh`: n2 tmpfs recording wrapper with the required n2 message environment
+- `scripts/upload_n2_recorded_data.sh`: upload n2 tmpfs recordings to the upper computer and delete the local copy after success
 - `scripts/start_vla_nodes.sh`: camera startup wrapper
 - `scripts/stop_vla_nodes.sh`: camera shutdown wrapper
 - `launch/vla_camera_nodes.launch.py`: ROS 2 launch entry for remote camera startup

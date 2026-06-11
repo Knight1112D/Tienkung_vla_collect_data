@@ -47,11 +47,12 @@ source /home/ubuntu/ros2ws/install/setup.bash
 7. 当前默认图像话题必须沿用旧稳定话题：头部 `/camera/color/image_raw/compressed`，左手 `/camera/d405_left/color/image_h264`，右手 `/camera/d405_right/color/image_h264`。
 8. D405 启动脚本应显式关闭深度、红外、IMU、点云、TF 和 diagnostics；`extrinsics/depth_to_color` 是外参标定话题，不是深度图像流，通常不构成带宽瓶颈。
 9. 采集目标频率为固定 `20Hz`。各话题回调只维护最新缓存，新图像或新状态到来就替换旧缓存；图像订阅使用 depth=1 best-effort，回调只缓存最新原始图像，PNG 解码和写盘放在保存线程中，避免旧图像在 ROS 队列里堆积；录制线程每 50ms 保存当前快照，允许复用上一帧图像和状态以保持固定训练频率。
-10. 终端输入 `1` 后，如果必需数据流尚未就绪，采集器会进入自动等待；等三路图像、机械臂 command/state 和左右手 state 都到齐后自动开始录制。缺 `head`、`hand_left`、`hand_right` 时会低频调用 `scripts/recover_vla_streams.sh` 自动恢复相机流；输入 `2` 可以取消等待或停止并保存当前录制。
+10. 终端输入 `1` 后，如果必需数据流尚未就绪，采集器会进入自动等待；等三路图像、机械臂 command/state 和左右手 state 都到齐后自动开始录制。缺 `head`、`hand_left`、`hand_right` 并超过宽限时间时会低频调用 `scripts/recover_vla_streams.sh` 自动恢复相机流；输入 `2` 可以取消等待或停止并保存当前录制。
 11. 采集输出必须贴旧项目格式：每组目录只有 `head/`、`hand_left/`、`hand_right/` 三路 PNG 序列和一个 `arm.npz`。不要再写 `samples.jsonl`、`summary.json`、`config.json` 或逐帧 `state_npz/`。
 12. `arm.npz` 至少保存机械臂 `cmd_positions`、`status_positions`、关节 id、左右手 state；左右手 command 也订阅并保存，如果当前话题不发布新消息，则保存为空数组，不伪造 command。
 13. 图像保存必须参考旧 VLA 实现：解码后直接保存 PNG，默认保持相机输出尺寸，不在采集脚本里 resize。相机启动阶段可以降低分辨率以减少带宽和磁盘；当前头部 Orbbec 为 `640x480x30`，左右 D405 为 `424x240x30`。
 14. 各主机时钟可能不同步，不要依赖跨主机 ROS stamp 做强对齐；如需检查复用和新鲜度，使用采集器写入的接收时间和图像 seq。
+15. 如果上位机订阅相机流长时间阻塞，使用 n2 tmpfs 方案：项目同步到 `/dev/shm/cbc_tienkung2.0_vla_collect_data`，运行 `bash scripts/n2_dual_hands_collect.sh --target-hz 20` 采集，采完运行 `bash scripts/upload_n2_recorded_data.sh` 上传到上位机 `dual_hands/` 并删除 n2 本地数据。
 
 ### 相机与话题检查
 

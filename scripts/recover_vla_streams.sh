@@ -30,7 +30,9 @@ if [[ "$need_head" -eq 1 ]]; then
 set -e
 pkill -f \"orbbec_camera gemini_330_series|camera_container\" 2>/dev/null || true
 sleep 2
+set +u
 source /opt/ros/humble/setup.bash 2>/dev/null || true
+set -u
 ros2 daemon stop >/dev/null 2>&1 || true
 ros2 daemon start >/dev/null 2>&1 || true
 cd /home/nvidia/njd/button
@@ -63,4 +65,3 @@ do
   echo "[recover] 检查 $topic"
   timeout 5 ros2 topic echo --once "$topic" >/dev/null && echo "[recover] ok $topic" || echo "[recover] missing $topic"
 done
-
