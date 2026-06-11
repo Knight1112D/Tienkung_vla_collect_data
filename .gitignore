@@ -1,0 +1,25 @@
+# Python cache and local environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Recorded data and generated previews
+vla_recorded_data/
+vla_recorded_data_from_n3/
+*.npz
+*.png
+*.jpg
+*.jpeg
+
+# Logs and temporary runtime files
+*.log
+logs/
+.pytest_cache/
+.mypy_cache/
+
+# OS/editor metadata
+.DS_Store
+.vscode/
+.idea/
+

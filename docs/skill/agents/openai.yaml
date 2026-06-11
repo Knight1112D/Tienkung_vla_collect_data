@@ -1,0 +1,4 @@
+interface:
+  display_name: "天工远程控制"
+  short_description: "天工机器人巡检与VLA数采指导"
+  default_prompt: "Use $tienkung-remote-control to inspect the Tienkung robot state and prepare the VLA data collection workflow."
