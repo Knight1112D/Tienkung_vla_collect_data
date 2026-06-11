@@ -40,8 +40,8 @@ python3 scripts/dual_hands_collect.py --target-hz 20
 
 进入采集程序后输入：
 
-- `1`：开始录制
-- `2`：停止录制并保存本组数据
+- `1`：开始录制；如果相机或状态流还没就绪，会自动等待到齐后开始；如果缺相机流，会自动尝试恢复对应相机节点
+- `2`：停止录制并保存本组数据；如果还在等待启动，会取消本次等待
 - `3`：删除上一组数据
 - `q`：退出脚本
 
@@ -108,6 +108,7 @@ python3 scripts/view_vla_cameras.py --save-preview /tmp/vla_preview.jpg
 - `scripts/dual_hands_collect.py`：双手采集程序，内部有独立 `main()`，直接运行这个文件。
 - `scripts/gripper_vla_collect.py`：加爪/夹爪采集程序模板，内部有独立 `main()`，后续确认爪子话题后直接运行这个文件。
 - `scripts/view_vla_cameras.py`：三路相机预览脚本，用于采集前确认视角。
+- `scripts/recover_vla_streams.sh`：相机流自动恢复脚本，采集器等待启动时可自动调用。
 - `launch/vla_camera_nodes.launch.py`：推荐的一键启动入口，用独立进程启动每个远端相机节点。
 - `scripts/start_vla_nodes.sh`：兼容包装，内部调用 `launch/vla_camera_nodes.launch.py`。
 - `scripts/stop_vla_nodes.sh`：停止相机节点，便于重新启动。
@@ -145,6 +146,13 @@ python3 scripts/dual_hands_collect.py \
 - 右手：`/camera/d405_right/color/image_h264`，`foxglove_msgs/msg/CompressedVideo`
 
 D405 默认沿用旧项目中已经稳定验证过的 h264 图像话题。采集器按 `20Hz` 固定保存当前最新缓存；新图像到来会替换缓存，没有新图像时允许复用上一帧，以保持固定训练采样频率。图像订阅使用 depth=1 best-effort，回调只缓存最新原始图像，PNG 解码和写盘放在保存线程中，避免旧图像在 ROS 队列里堆积。默认保存 PNG 保持相机输出尺寸，不做 resize；如需临时缩放可显式传 `--output-image-size 224`。
+
+如果输入 `1` 后提示缺 `head`、`hand_left` 或 `hand_right`，采集器会每隔一段时间自动调用 `scripts/recover_vla_streams.sh` 恢复缺失相机流。也可以手动运行：
+
+```bash
+bash scripts/recover_vla_streams.sh head
+bash scripts/recover_vla_streams.sh hand_left hand_right
+```
 
 ## 加爪/夹爪采集
 

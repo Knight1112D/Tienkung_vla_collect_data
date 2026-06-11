@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -27,6 +28,8 @@ from foxglove_msgs.msg import CompressedVideo
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import CompressedImage, Image, JointState
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def ros_time_to_sec(stamp: Any) -> float:
@@ -44,10 +47,14 @@ class VLACollectNode(Node):
         self.args = args
         self.running = True
         self.is_recording = False
+        self.pending_start = False
         self.current_dir: Optional[Path] = None
         self.last_saved_dir: Optional[Path] = None
         self.frame_count = 0
         self.lock = threading.Lock()
+        self.last_wait_log_sec = 0.0
+        self.last_wait_missing: Tuple[str, ...] = ()
+        self.last_recover_sec = 0.0
 
         self.left_arm_joint_ids = list(range(11, 18))
         self.right_arm_joint_ids = list(range(21, 28))
@@ -268,19 +275,17 @@ class VLACollectNode(Node):
                 return
             missing = self.missing_streams()
             if missing:
-                self.get_logger().warn(f"数据流未完全就绪，请等待: {', '.join(missing)}")
+                self.pending_start = True
+                self._log_waiting_streams(missing, force=True)
                 return
-            self.current_dir = self.next_session_dir()
-            (self.current_dir / "head").mkdir(parents=True, exist_ok=False)
-            (self.current_dir / "hand_left").mkdir(parents=True, exist_ok=False)
-            (self.current_dir / "hand_right").mkdir(parents=True, exist_ok=False)
-            self.frame_count = 0
-            self._reset_histories()
-            self.is_recording = True
-            print(f"\n开始采集... (帧率: {self.args.target_hz:.1f}Hz, 目录: {self.current_dir})")
+            self._begin_recording_locked()
 
     def stop_recording(self) -> None:
         with self.lock:
+            if self.pending_start and not self.is_recording:
+                self.pending_start = False
+                print("\n已取消等待启动。\n")
+                return
             if not self.is_recording:
                 return
             self.is_recording = False
@@ -311,7 +316,64 @@ class VLACollectNode(Node):
         while self.running:
             next_tick += interval
             time.sleep(max(0.0, next_tick - time.perf_counter()))
+            self.try_auto_start()
             self.write_snapshot()
+
+    def try_auto_start(self) -> None:
+        """按 1 后如果数据流暂未就绪，在后台等待到齐后自动开始录制。"""
+        with self.lock:
+            if not self.pending_start or self.is_recording:
+                return
+            missing = self.missing_streams()
+            if missing:
+                self._log_waiting_streams(missing, force=False)
+                return
+            self._begin_recording_locked()
+
+    def _begin_recording_locked(self) -> None:
+        """在持锁状态下创建本组目录并进入录制状态。"""
+        self.current_dir = self.next_session_dir()
+        (self.current_dir / "head").mkdir(parents=True, exist_ok=False)
+        (self.current_dir / "hand_left").mkdir(parents=True, exist_ok=False)
+        (self.current_dir / "hand_right").mkdir(parents=True, exist_ok=False)
+        self.frame_count = 0
+        self._reset_histories()
+        self.pending_start = False
+        self.is_recording = True
+        print(f"\n开始采集... (帧率: {self.args.target_hz:.1f}Hz, 目录: {self.current_dir})")
+
+    def _log_waiting_streams(self, missing: List[str], force: bool) -> None:
+        """限频输出等待中的数据流，避免终端刷屏。"""
+        now = time.time()
+        missing_tuple = tuple(missing)
+        if force or missing_tuple != self.last_wait_missing or now - self.last_wait_log_sec >= 2.0:
+            self.get_logger().warn(f"数据流未完全就绪，已进入自动等待: {', '.join(missing)}")
+            self.last_wait_missing = missing_tuple
+            self.last_wait_log_sec = now
+        self.maybe_recover_streams(missing, now)
+
+    def maybe_recover_streams(self, missing: List[str], now: float) -> None:
+        """等待启动时自动恢复缺失的相机流。"""
+        image_missing = [name for name in missing if name in {"head", "hand_left", "hand_right"}]
+        if not image_missing or not self.args.auto_recover_streams:
+            return
+        if now - self.last_recover_sec < self.args.recover_interval_sec:
+            return
+        self.last_recover_sec = now
+        script = PROJECT_ROOT / "scripts" / "recover_vla_streams.sh"
+        if not script.exists():
+            self.get_logger().warn(f"自动恢复脚本不存在: {script}")
+            return
+        self.get_logger().warn(f"尝试自动恢复相机流: {', '.join(image_missing)}")
+        try:
+            subprocess.Popen(
+                ["bash", str(script), *image_missing],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except Exception as exc:
+            self.get_logger().warn(f"自动恢复相机流失败: {exc}")
 
     def write_snapshot(self) -> None:
         with self.lock:
@@ -430,6 +492,7 @@ class VLACollectNode(Node):
 
     def cleanup(self) -> None:
         self.running = False
+        self.pending_start = False
         if self.is_recording:
             self.stop_recording()
         self.save_thread.join(timeout=1.0)
@@ -466,6 +529,8 @@ def build_arg_parser(
     parser.add_argument("--right-hand-cmd-topic", default="/inspire_hand/ctrl/right_hand", help="右灵巧手 command 话题")
     parser.add_argument("--left-hand-state-topic", default="/inspire_hand/state/left_hand", help="左灵巧手 state 话题")
     parser.add_argument("--right-hand-state-topic", default="/inspire_hand/state/right_hand", help="右灵巧手 state 话题")
+    parser.add_argument("--auto-recover-streams", action=argparse.BooleanOptionalAction, default=True, help="等待启动时自动恢复缺失的相机流")
+    parser.add_argument("--recover-interval-sec", type=float, default=20.0, help="自动恢复相机流的最小间隔秒数")
     parser.add_argument("--extra-joint-state-topic", dest="extra_joint_state_topics", type=parse_named_topic, action="append", default=[], help=argparse.SUPPRESS)
     return parser
 

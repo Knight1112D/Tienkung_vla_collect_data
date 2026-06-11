@@ -34,8 +34,8 @@ python3 scripts/dual_hands_collect.py --target-hz 20
 
 Recorder controls:
 
-- `1`: start recording
-- `2`: stop recording and save the episode
+- `1`: start recording; if any required stream is not ready yet, the recorder waits automatically and starts once all streams are available; missing camera streams trigger automatic recovery
+- `2`: stop recording and save the episode; if the recorder is still waiting to start, this cancels the pending start
 - `3`: delete the last saved episode
 - `q`: quit
 
@@ -199,12 +199,15 @@ The collector can start once all three image streams, arm command/state, and han
 
 New image or state messages replace the previous cache. If no newer image arrives before the next fixed-rate tick, the recorder may reuse the latest cached frame to keep the training sample rate stable. Image subscriptions use depth=1 best-effort QoS, and image callbacks only cache the latest raw payload; PNG decoding and disk writes happen in the save thread so old image messages do not build up in the ROS queue.
 
+If `head`, `hand_left`, or `hand_right` is missing after pressing `1`, the recorder periodically calls `scripts/recover_vla_streams.sh` to recover the missing camera stream. The script can also be run manually.
+
 ## Project Layout
 
 - `cbc_tienkung_vla/collector.py`: shared fixed-rate collection logic
 - `scripts/dual_hands_collect.py`: dual-hand recording entry point
 - `scripts/gripper_vla_collect.py`: gripper collection template
 - `scripts/view_vla_cameras.py`: three-camera preview tool
+- `scripts/recover_vla_streams.sh`: camera-stream recovery helper used by the recorder while waiting to start
 - `scripts/start_vla_nodes.sh`: camera startup wrapper
 - `scripts/stop_vla_nodes.sh`: camera shutdown wrapper
 - `launch/vla_camera_nodes.launch.py`: ROS 2 launch entry for remote camera startup
