@@ -1,10 +1,10 @@
 # Tienkung VLA Data Collection
 
-This project runs on the Tienkung upper computer and records VLA training data at a fixed sampling rate. It captures three RGB image streams, arm command/state positions, and dexterous-hand command/state positions, then saves them in the legacy VLA-compatible directory format.
+This project records VLA training data for Tienkung 2.0 PRO at a fixed sampling rate. It captures three RGB image streams, arm command/state positions, and dexterous-hand command/state positions, then saves them in the legacy VLA-compatible directory format. The final stable workflow starts camera/head nodes from the upper computer, records locally on n2 into tmpfs, then uploads the episodes back to the upper computer.
 
 ## Quick Start
 
-Run the following commands on the upper computer:
+Start the camera nodes from the upper computer:
 
 ```bash
 ssh tienkung
@@ -26,10 +26,13 @@ If no GUI is available, save a preview image instead:
 python3 scripts/view_vla_cameras.py --save-preview /tmp/vla_preview.jpg
 ```
 
-Start the recorder:
+Run the stable recorder on n2:
 
 ```bash
-python3 scripts/dual_hands_collect.py --target-hz 20
+ssh tienkung
+ssh n2
+cd /home/nvidia/cbc_tienkung2.0_vla_collect_data
+bash scripts/n2_dual_hands_collect.sh --target-hz 20
 ```
 
 Recorder controls:
@@ -39,31 +42,30 @@ Recorder controls:
 - `3`: delete the last saved episode
 - `q`: quit
 
-Data is saved by default to:
+The n2 project lives in persistent storage at `/home/nvidia/cbc_tienkung2.0_vla_collect_data`, so it survives reboot. Episodes are written to tmpfs by default:
 
 ```text
-/home/ubuntu/cbc_tienkung2.0_vla_collect_data/vla_recorded_data/dual_hands
+/dev/shm/cbc_tienkung2.0_vla_collect_data/vla_recorded_data/dual_hands
 ```
 
-The default workflow records directly on the upper computer, so no n3 upload step is required.
-
-If camera subscription on the upper computer stalls for a long time, record on n2 tmpfs instead:
-
-```bash
-ssh tienkung
-ssh n2
-cd /home/nvidia/cbc_tienkung2.0_vla_collect_data
-bash scripts/n2_dual_hands_collect.sh --target-hz 20
-```
-
-After recording, upload the n2 data to the upper computer and remove the local n2 copy:
+Upload the n2 episodes to the upper computer and remove the local tmpfs copy:
 
 ```bash
 cd /home/nvidia/cbc_tienkung2.0_vla_collect_data
 bash scripts/upload_n2_recorded_data.sh
 ```
 
-The n2 project lives in persistent storage at `/home/nvidia/cbc_tienkung2.0_vla_collect_data`, so it survives reboot. Recorded episodes are written to `/dev/shm/cbc_tienkung2.0_vla_collect_data/vla_recorded_data/dual_hands` by default and are removed after a successful upload.
+The upload target is:
+
+```text
+/home/ubuntu/cbc_tienkung2.0_vla_collect_data/vla_recorded_data/dual_hands
+```
+
+The upper-computer recorder is still available as a fallback:
+
+```bash
+python3 scripts/dual_hands_collect.py --target-hz 20
+```
 
 ## Camera Startup And Shutdown
 
@@ -198,6 +200,20 @@ Main `arm.npz` fields:
 For arm state, only joint positions are written. Arm speed, current, temperature, and error fields are parsed internally but not saved to `arm.npz`.
 
 The recorder no longer writes `samples.jsonl`, `summary.json`, `config.json`, or per-frame `state_npz/` files.
+
+## D405 Hand Camera Mount Assets
+
+The `assets/` directory contains Intel RealSense D405 camera-mount references for Tienkung 2.0 PRO with Inspire 6-DOF dexterous hands. The mount is placed near the wrist/hand so the D405 can observe the thumb-index web area and grasping region. It is fixed with two M3 screws.
+
+Files:
+
+- `camera_holder_dual_hands_l.jpg`: left-hand mount reference photo.
+- `camera_holder_dual_hands_r.jpg`: right-hand mount reference photo.
+- `d405_usb.jpg`: example D405 USB connection to the AGX.
+- `tirnkung_wrist_camera.STL`: wrist D405 mount STL model.
+- `2hand_camera.STL`: dual-hand camera mount STL model.
+
+Before teleoperation or data collection, check screw length, finger clearance, camera-cable slack, and cable strain relief.
 
 ## Health Checks
 

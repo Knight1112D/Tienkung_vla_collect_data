@@ -11,6 +11,12 @@ vla_recorded_data_from_n3/
 *.png
 *.jpg
 *.jpeg
+!assets/
+!assets/*.jpg
+!assets/*.jpeg
+!assets/*.STL
+!assets/*.stl
+!assets/*.md
 
 # Logs and temporary runtime files
 *.log
@@ -22,4 +28,3 @@ logs/
 .DS_Store
 .vscode/
 .idea/
-

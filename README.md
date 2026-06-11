@@ -1,10 +1,10 @@
 # 天工 VLA 数据采集工程
 
-本工程在上位机运行，负责按固定频率采集三路 RGB 图像、机械臂 command/state、灵巧手 command/state，并保存为旧项目兼容的数据结构。
+本工程用于天工 2.0 PRO 的 VLA 数据采集，负责按固定频率采集三路 RGB 图像、机械臂 command/state、灵巧手 command/state，并保存为旧项目兼容的数据结构。最终稳定流程为：上位机启动相机与低头节点，`n2` 在本机 `/dev/shm` 中采集，采完后自动上传回上位机数据目录。
 
 ## 最简单使用说明
 
-默认采集在上位机运行，数据会直接保存到上位机，不需要再传输。
+推荐稳定采集在 `n2` 运行，避免上位机远程订阅图像流时偶发阻塞。
 
 1. 启动相机节点：
 
@@ -31,29 +31,7 @@ python3 scripts/view_vla_cameras.py
 python3 scripts/view_vla_cameras.py --save-preview /tmp/vla_preview.jpg
 ```
 
-3. 开始采集：
-
-```bash
-cd /home/ubuntu/cbc_tienkung2.0_vla_collect_data
-python3 scripts/dual_hands_collect.py --target-hz 20
-```
-
-进入采集程序后输入：
-
-- `1`：开始录制；如果相机或状态流还没就绪，会自动等待到齐后开始；如果缺相机流，会自动尝试恢复对应相机节点
-- `2`：停止录制并保存本组数据；如果还在等待启动，会取消本次等待
-- `3`：删除上一组数据
-- `q`：退出脚本
-
-数据默认保存到：
-
-```text
-/home/ubuntu/cbc_tienkung2.0_vla_collect_data/vla_recorded_data/dual_hands
-```
-
-4. 当前默认流程是在上位机采集并直接落盘，不再需要从 n3 上传数据。
-
-如果上位机订阅相机流出现长时间阻塞，改用 n2 的 tmpfs 采集：
+3. 在 n2 开始采集：
 
 ```bash
 ssh tienkung
@@ -62,14 +40,38 @@ cd /home/nvidia/cbc_tienkung2.0_vla_collect_data
 bash scripts/n2_dual_hands_collect.sh --target-hz 20
 ```
 
-采完后从 n2 上传到上位机并删除 n2 本地数据：
+采集程序内输入：
+
+- `1`：开始录制；如果相机或状态流还没就绪，会自动等待到齐后开始；如果缺相机流，会自动尝试恢复对应相机节点
+- `2`：停止录制并保存本组数据；如果还在等待启动，会取消本次等待
+- `3`：删除上一组数据
+- `q`：退出脚本
+
+n2 项目代码放在持久目录 `/home/nvidia/cbc_tienkung2.0_vla_collect_data`，重启不会清空；采集数据默认写入 tmpfs：
+
+```text
+/dev/shm/cbc_tienkung2.0_vla_collect_data/vla_recorded_data/dual_hands
+```
+
+4. 上传到上位机并删除 n2 本地数据：
 
 ```bash
 cd /home/nvidia/cbc_tienkung2.0_vla_collect_data
 bash scripts/upload_n2_recorded_data.sh
 ```
 
-n2 项目代码放在持久目录 `/home/nvidia/cbc_tienkung2.0_vla_collect_data`，重启不会清空；采集数据默认写入 `/dev/shm/cbc_tienkung2.0_vla_collect_data/vla_recorded_data/dual_hands`，上传成功后会删除本地 tmpfs 数据。
+上传目标目录为：
+
+```text
+/home/ubuntu/cbc_tienkung2.0_vla_collect_data/vla_recorded_data/dual_hands
+```
+
+5. 上位机也可以作为备用采集入口：
+
+```bash
+cd /home/ubuntu/cbc_tienkung2.0_vla_collect_data
+python3 scripts/dual_hands_collect.py --target-hz 20
+```
 
 ## D405 USB 恢复
 
@@ -133,6 +135,7 @@ python3 scripts/view_vla_cameras.py --save-preview /tmp/vla_preview.jpg
 - `scripts/start_vla_nodes.sh`：兼容包装，内部调用 `launch/vla_camera_nodes.launch.py`。
 - `scripts/stop_vla_nodes.sh`：停止相机节点，便于重新启动。
 - `configs/`：运行参数示例。
+- `assets/`：D405 手部相机支架图片和 STL 模型。
 - `docs/skill/`：同步的 skill 文档和巡检参考资料。
 
 ## 推荐流程
@@ -140,8 +143,9 @@ python3 scripts/view_vla_cameras.py --save-preview /tmp/vla_preview.jpg
 1. 确认机器人已进入安全的 VLA 初始状态。
 2. 使用 `bash scripts/start_vla_nodes.sh` 启动全部相机并默认低头；如果头已经低下去了，使用 `bash scripts/start_vla_nodes.sh --no-move-head`。
 3. 检查图像、机械臂和灵巧手话题 publisher 与频率。
-4. 运行对应采集程序，终端输入 `1` 开始、`2` 停止、`3` 删除上一组、`q` 退出。
-5. 查看每组三路 PNG 数量和 `arm.npz` 数组形状，确认图像、机械臂和手部状态已保存。
+4. 稳定采集优先登录 `n2`，运行 `bash scripts/n2_dual_hands_collect.sh --target-hz 20`，终端输入 `1` 开始、`2` 停止、`3` 删除上一组、`q` 退出。
+5. 采完后在 n2 运行 `bash scripts/upload_n2_recorded_data.sh`，上传到上位机 `vla_recorded_data/dual_hands/` 并清理 n2 tmpfs。
+6. 查看每组三路 PNG 数量和 `arm.npz` 数组形状，确认图像、机械臂和手部状态已保存。
 
 ## 双手采集
 
@@ -218,6 +222,20 @@ GitHub 仓库只保留一组完整样例数据用于检查格式，当前样例�
 - `*_image_seq`、`*_image_recv_sec`、`*_image_stamp_sec`：每帧复用的最新图像序号和时间信息，用于后处理检查复用情况。
 
 采集目录不再写 `samples.jsonl`、`summary.json`、`config.json` 或 `state_npz/`，以兼容旧项目格式。
+
+## D405 手部相机支架资产
+
+`assets/` 目录保存了天工 2.0 PRO 搭配因时 6 自由度灵巧手时使用的 Intel RealSense D405 相机支架资料。支架安装在手腕/手部附近，使 D405 可以观察虎口和抓取区域；固定需要两颗 M3 螺丝。
+
+目录内文件：
+
+- `camera_holder_dual_hands_l.jpg`：左手侧支架安装参考图。
+- `camera_holder_dual_hands_r.jpg`：右手侧支架安装参考图。
+- `d405_usb.jpg`：D405 通过 USB 连接到 AGX 的示意图。
+- `tirnkung_wrist_camera.STL`：腕部 D405 支架 STL 模型。
+- `2hand_camera.STL`：双手相机支架 STL 模型。
+
+安装后先确认螺丝长度、手指运动包络、相机线缆余量和扎线位置，再进入遥操作或采集流程。
 
 ## 一键启动相机节点
 
