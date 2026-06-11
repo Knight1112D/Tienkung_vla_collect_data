@@ -18,7 +18,7 @@ description: Remote inspection, SSH operation, ROS 2 diagnostics, and VLA data-c
 
 - 读取 `references/collect-data-requirements.md`：了解 VLA 数采目标、期望工程名、相机与 command/state 对齐要求、目标脚本名和参考项目路径。
 - 读取 `references/robot-inspection-2026-06-08.md`：了解已巡检到的主机、网络、ROS 2、话题频率、相机硬件和磁盘资源。
-- 读取 `references/vla-session-state-2026-06-10.md`：了解当前 VLA 采集工程的实际启动方式、默认话题、上传脚本和最新约束。
+- 读取 `references/vla-session-state-2026-06-10.md`：了解当前 VLA 采集工程的实际启动方式、默认话题和历史约束；其中 n3 上传脚本相关内容已过时，当前默认是在上位机直接采集落盘。
 
 ## 常用流程
 

@@ -177,7 +177,7 @@ Main `arm.npz` fields:
 - `left_hand_cmd_positions`, `right_hand_cmd_positions`: hand command positions when available
 - `*_image_seq`, `*_image_recv_sec`, `*_image_stamp_sec`: image-cache sequence and timing metadata
 
-Only arm state positions are written. Arm speed, current, temperature, and error fields are parsed internally but not saved to `arm.npz`.
+For arm state, only joint positions are written. Arm speed, current, temperature, and error fields are parsed internally but not saved to `arm.npz`.
 
 The recorder no longer writes `samples.jsonl`, `summary.json`, `config.json`, or per-frame `state_npz/` files.
 
@@ -196,6 +196,8 @@ ros2 topic hz /inspire_hand/state/right_hand --window 50
 ```
 
 The collector can start once all three image streams, arm command/state, and hand state streams have received data. During recording it writes the latest cached snapshot at the requested fixed rate, typically 20 Hz.
+
+New image or state messages replace the previous cache. If no newer image arrives before the next fixed-rate tick, the recorder may reuse the latest cached frame to keep the training sample rate stable.
 
 ## Project Layout
 

@@ -6,7 +6,7 @@
 
 默认采集在上位机运行，数据会直接保存到上位机，不需要再传输。
 
-1. 启动相机和状态节点：
+1. 启动相机节点：
 
 ```bash
 ssh tienkung
@@ -241,6 +241,7 @@ ros2 topic info /camera/d405_right/color/image_h264
 ros2 topic hz /camera/color/image_raw/compressed --window 30
 ros2 topic hz /camera/d405_left/color/image_h264 --window 30
 ros2 topic hz /camera/d405_right/color/image_h264 --window 30
+ros2 topic hz /arm/cmd_ctrl --window 30
 ros2 topic hz /arm/status --window 100
 ros2 topic hz /inspire_hand/state/left_hand --window 50
 ros2 topic hz /inspire_hand/state/right_hand --window 50
