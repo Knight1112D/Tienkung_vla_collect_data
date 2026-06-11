@@ -46,7 +46,7 @@ source /home/ubuntu/ros2ws/install/setup.bash
 6. `launch/vla_camera_nodes.launch.py` 只负责托管旧稳定启动脚本：`n3` 执行 `/home/nvidia/njd/env_init.sh`，`n2` 执行 `/home/nvidia/njd/button/tool/start_camera.sh`，`n1` 根据 `move_head` 参数发布一次低头命令。不要再把它改回直接启动低层 D405 raw 节点。
 7. 当前默认图像话题必须沿用旧稳定话题：头部 `/camera/color/image_raw/compressed`，左手 `/camera/d405_left/color/image_h264`，右手 `/camera/d405_right/color/image_h264`。
 8. D405 启动脚本应显式关闭深度、红外、IMU、点云、TF 和 diagnostics；`extrinsics/depth_to_color` 是外参标定话题，不是深度图像流，通常不构成带宽瓶颈。
-9. 采集目标频率为固定 `20Hz`。各话题回调只维护最新缓存，新图像或新状态到来就替换旧缓存；录制线程每 50ms 保存当前快照，允许复用上一帧图像和状态以保持固定训练频率。
+9. 采集目标频率为固定 `20Hz`。各话题回调只维护最新缓存，新图像或新状态到来就替换旧缓存；图像订阅使用 depth=1 best-effort，回调只缓存最新原始图像，PNG 解码和写盘放在保存线程中，避免旧图像在 ROS 队列里堆积；录制线程每 50ms 保存当前快照，允许复用上一帧图像和状态以保持固定训练频率。
 10. 采集输出必须贴旧项目格式：每组目录只有 `head/`、`hand_left/`、`hand_right/` 三路 PNG 序列和一个 `arm.npz`。不要再写 `samples.jsonl`、`summary.json`、`config.json` 或逐帧 `state_npz/`。
 11. `arm.npz` 至少保存机械臂 `cmd_positions`、`status_positions`、关节 id、左右手 state；左右手 command 也订阅并保存，如果当前话题不发布新消息，则保存为空数组，不伪造 command。
 12. 图像保存必须参考旧 VLA 实现：解码后直接保存 PNG，默认保持相机输出尺寸，不在采集脚本里 resize。相机启动阶段可以降低分辨率以减少带宽和磁盘；当前头部 Orbbec 为 `640x480x30`，左右 D405 为 `424x240x30`。

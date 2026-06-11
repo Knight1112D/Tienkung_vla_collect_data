@@ -3,7 +3,7 @@
 天工 2.0 PRO VLA 固定频率数据采集器。
 
 采集规则：
-- 回调线程持续保存每个话题的最新数据，新消息到来就替换旧缓存。
+- 回调线程只保存每个话题的最新原始数据，新消息到来就替换旧缓存，避免图像解码阻塞 ROS 回调。
 - 录制线程按固定 20Hz 保存当前快照，允许复用上一帧图像和状态。
 - 输出结构贴近旧项目：每组目录只包含 head/、hand_left/、hand_right/ 和 arm.npz。
 """
@@ -25,7 +25,7 @@ import rclpy
 from bodyctrl_msgs.msg import CmdMotorCtrl, MotorStatusMsg
 from foxglove_msgs.msg import CompressedVideo
 from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy, qos_profile_system_default
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import CompressedImage, Image, JointState
 
 
@@ -53,7 +53,8 @@ class VLACollectNode(Node):
         self.right_arm_joint_ids = list(range(21, 28))
         self.arm_joint_ids = self.left_arm_joint_ids + self.right_arm_joint_ids
 
-        self.latest_images: Dict[str, Optional[bytes]] = {"head": None, "hand_left": None, "hand_right": None}
+        self.latest_images: Dict[str, Any] = {"head": None, "hand_left": None, "hand_right": None}
+        self.latest_image_compressed: Dict[str, bool] = {"head": True, "hand_left": True, "hand_right": True}
         self.latest_image_seq: Dict[str, int] = {"head": 0, "hand_left": 0, "hand_right": 0}
         self.latest_image_recv_sec: Dict[str, float] = {"head": 0.0, "hand_left": 0.0, "hand_right": 0.0}
         self.latest_image_stamp_sec: Dict[str, float] = {"head": 0.0, "hand_left": 0.0, "hand_right": 0.0}
@@ -83,7 +84,12 @@ class VLACollectNode(Node):
         self.get_logger().info("VLA 固定频率采集器已启动，请输入 1 开始、2 停止、3 删除上一组、q 退出。")
 
     def _create_subscriptions(self) -> None:
-        image_qos = qos_profile_system_default
+        image_qos = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            durability=DurabilityPolicy.VOLATILE,
+        )
         state_qos = QoSProfile(
             history=HistoryPolicy.KEEP_LAST,
             depth=80,
@@ -124,12 +130,13 @@ class VLACollectNode(Node):
         self.update_image(name, frame, ros_time_to_sec(msg.header.stamp), compressed=False)
 
     def update_image(self, name: str, payload: Any, stamp_sec: float, compressed: bool) -> None:
-        """解码并更新最新 PNG 缓存；新图像到来直接替换旧图像。"""
-        png_bytes = self.payload_to_png(payload, compressed=compressed)
-        if png_bytes is None:
+        """更新最新图像缓存；回调中不做 PNG 编码，避免阻塞 ROS 消息处理。"""
+        cached_payload = bytes(payload) if compressed else payload
+        if cached_payload is None:
             return
         with self.lock:
-            self.latest_images[name] = png_bytes
+            self.latest_images[name] = cached_payload
+            self.latest_image_compressed[name] = compressed
             self.latest_image_seq[name] += 1
             self.latest_image_recv_sec[name] = time.time()
             self.latest_image_stamp_sec[name] = stamp_sec
@@ -314,8 +321,20 @@ class VLACollectNode(Node):
                 return
             index = self.frame_count
             current_dir = self.current_dir
-            images = {name: bytes(value) for name, value in self.latest_images.items() if value is not None}
+            image_payloads = {name: value for name, value in self.latest_images.items() if value is not None}
+            image_compressed = dict(self.latest_image_compressed)
             snapshot = self.build_state_snapshot()
+
+        images: Dict[str, bytes] = {}
+        for name, payload in image_payloads.items():
+            png_bytes = self.payload_to_png(payload, compressed=image_compressed[name])
+            if png_bytes is None:
+                return
+            images[name] = png_bytes
+
+        with self.lock:
+            if not self.is_recording or self.current_dir != current_dir or self.frame_count != index:
+                return
             self.append_histories(snapshot)
             self.frame_count += 1
 

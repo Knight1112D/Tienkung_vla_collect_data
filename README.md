@@ -144,7 +144,7 @@ python3 scripts/dual_hands_collect.py \
 - 左手：`/camera/d405_left/color/image_h264`，`foxglove_msgs/msg/CompressedVideo`
 - 右手：`/camera/d405_right/color/image_h264`，`foxglove_msgs/msg/CompressedVideo`
 
-D405 默认沿用旧项目中已经稳定验证过的 h264 图像话题。采集器按 `20Hz` 固定保存当前最新缓存；新图像到来会替换缓存，没有新图像时允许复用上一帧，以保持固定训练采样频率。默认保存 PNG 保持相机输出尺寸，不做 resize；如需临时缩放可显式传 `--output-image-size 224`。
+D405 默认沿用旧项目中已经稳定验证过的 h264 图像话题。采集器按 `20Hz` 固定保存当前最新缓存；新图像到来会替换缓存，没有新图像时允许复用上一帧，以保持固定训练采样频率。图像订阅使用 depth=1 best-effort，回调只缓存最新原始图像，PNG 解码和写盘放在保存线程中，避免旧图像在 ROS 队列里堆积。默认保存 PNG 保持相机输出尺寸，不做 resize；如需临时缩放可显式传 `--output-image-size 224`。
 
 ## 加爪/夹爪采集
 

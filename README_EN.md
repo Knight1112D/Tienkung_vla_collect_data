@@ -197,7 +197,7 @@ ros2 topic hz /inspire_hand/state/right_hand --window 50
 
 The collector can start once all three image streams, arm command/state, and hand state streams have received data. During recording it writes the latest cached snapshot at the requested fixed rate, typically 20 Hz.
 
-New image or state messages replace the previous cache. If no newer image arrives before the next fixed-rate tick, the recorder may reuse the latest cached frame to keep the training sample rate stable.
+New image or state messages replace the previous cache. If no newer image arrives before the next fixed-rate tick, the recorder may reuse the latest cached frame to keep the training sample rate stable. Image subscriptions use depth=1 best-effort QoS, and image callbacks only cache the latest raw payload; PNG decoding and disk writes happen in the save thread so old image messages do not build up in the ROS queue.
 
 ## Project Layout
 
