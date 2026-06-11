@@ -1,13 +1,25 @@
 # Tienkung VLA Data Collection
 
-This project records VLA training data for Tienkung 2.0 PRO at a fixed sampling rate. It captures three RGB image streams, arm command/state positions, and dexterous-hand command/state positions, then saves them in the legacy VLA-compatible directory format. The final stable workflow starts camera/head nodes from the upper computer, records locally on n2 into tmpfs, then uploads the episodes back to the upper computer.
+This project records VLA training data for Tienkung 2.0 PRO at a fixed sampling rate. It captures three RGB image streams, arm command/state positions, and dexterous-hand command/state positions, then saves them in the legacy VLA-compatible directory format. The final stable workflow starts camera/head nodes from the upper computer, records locally on the recording AGX into tmpfs, then uploads the episodes back to the upper computer.
+
+## Hardware Topology
+
+The physical system contains:
+
+- A Tienkung 2.0 PRO robot with Inspire 6-DOF dexterous hands mounted on both arms.
+- A homogeneous teleoperation arm system used for human demonstration during collection.
+- An upper computer used to run the official teleoperation/collection software, start and stop robot-side camera nodes, and archive the final dataset.
+- A robot x86 control computer used for ROS 2 control, arm/head commands, and robot state publishing.
+- A recording AGX used to subscribe to the three image streams, arm topics, and hand topics, then write episodes to local `/dev/shm`.
+- A camera AGX used to connect the left/right Intel RealSense D405 cameras and run the D405 image nodes plus h264 conversion processes.
+
+Recording on the upper computer can occasionally stall when subscribing to remote image streams. For that reason, the stable workflow records on the recording AGX. Because AGX storage and memory are limited, episodes are first written to tmpfs and then uploaded to the upper computer for long-term storage.
 
 ## Quick Start
 
 Start the camera nodes from the upper computer:
 
 ```bash
-ssh tienkung
 cd /home/ubuntu/cbc_tienkung2.0_vla_collect_data
 bash scripts/start_vla_nodes.sh --no-move-head
 ```
@@ -26,11 +38,11 @@ If no GUI is available, save a preview image instead:
 python3 scripts/view_vla_cameras.py --save-preview /tmp/vla_preview.jpg
 ```
 
-Run the stable recorder on n2:
+Run the stable recorder on the recording AGX:
+
+`n2` in the script name is a local deployment name; conceptually this script is the recording-AGX recorder.
 
 ```bash
-ssh tienkung
-ssh n2
 cd /home/nvidia/cbc_tienkung2.0_vla_collect_data
 bash scripts/n2_dual_hands_collect.sh --target-hz 20
 ```
@@ -42,13 +54,13 @@ Recorder controls:
 - `3`: delete the last saved episode
 - `q`: quit
 
-The n2 project lives in persistent storage at `/home/nvidia/cbc_tienkung2.0_vla_collect_data`, so it survives reboot. Episodes are written to tmpfs by default:
+The recording AGX project lives in persistent storage at `/home/nvidia/cbc_tienkung2.0_vla_collect_data`, so it survives reboot. Episodes are written to tmpfs by default:
 
 ```text
 /dev/shm/cbc_tienkung2.0_vla_collect_data/vla_recorded_data/dual_hands
 ```
 
-Upload the n2 episodes to the upper computer and remove the local tmpfs copy:
+Upload the recorded episodes to the upper computer and remove the local tmpfs copy from the recording AGX:
 
 ```bash
 cd /home/nvidia/cbc_tienkung2.0_vla_collect_data
@@ -95,22 +107,26 @@ bash scripts/start_vla_nodes.sh --no-move-head
 
 The launch flow starts:
 
-- the head Orbbec camera on `n2`
-- the left and right Intel RealSense D405 cameras on `n3`
+- the head Orbbec camera on the recording AGX
+- the left and right Intel RealSense D405 cameras on the camera AGX
 - the D405 h264 conversion nodes
-- optionally, a one-shot head-down command on `n1`
+- optionally, a one-shot head-down command on the robot x86 control computer
 
 ## D405 USB Recovery
 
-If a D405 camera is visible in `lsusb` but does not publish images, or if `rs-enumerate-devices` reports no usable device, reset the n3 USB controller:
+If a D405 camera is visible in `lsusb` but does not publish images, or if `rs-enumerate-devices` reports no usable device, reset the USB controller on the camera AGX.
+
+On the upper computer, stop the current VLA nodes first:
 
 ```bash
-ssh tienkung
 cd /home/ubuntu/cbc_tienkung2.0_vla_collect_data
 bash scripts/stop_vla_nodes.sh
 tmux kill-session -t vla_camera_launch 2>/dev/null || true
+```
 
-ssh n3
+On the camera AGX, reset the USB controller:
+
+```bash
 printf 'nvidia\n' | sudo -S bash -lc '
 cd /sys/bus/platform/drivers/tegra-xusb
 echo 3610000.usb > unbind
@@ -127,10 +143,9 @@ Expected D405 serial numbers:
 - `353322271022`
 - `230322275908`
 
-After recovery, restart the nodes:
+After recovery, restart the nodes from the upper computer:
 
 ```bash
-exit
 cd /home/ubuntu/cbc_tienkung2.0_vla_collect_data
 bash scripts/start_vla_nodes.sh --no-move-head
 ```
@@ -244,8 +259,8 @@ Automatic recovery waits for a short grace period first, so newly starting camer
 - `scripts/gripper_vla_collect.py`: gripper collection template
 - `scripts/view_vla_cameras.py`: three-camera preview tool
 - `scripts/recover_vla_streams.sh`: camera-stream recovery helper used by the recorder while waiting to start
-- `scripts/n2_dual_hands_collect.sh`: n2 tmpfs recording wrapper with the required n2 message environment
-- `scripts/upload_n2_recorded_data.sh`: upload n2 tmpfs recordings to the upper computer and delete the local copy after success
+- `scripts/n2_dual_hands_collect.sh`: recording-AGX tmpfs recording wrapper with the required robot-side message environment; `n2` in the filename is a local deployment name
+- `scripts/upload_n2_recorded_data.sh`: upload recording-AGX tmpfs episodes to the upper computer and delete the local copy after success; `n2` in the filename is a local deployment name
 - `scripts/start_vla_nodes.sh`: camera startup wrapper
 - `scripts/stop_vla_nodes.sh`: camera shutdown wrapper
 - `launch/vla_camera_nodes.launch.py`: ROS 2 launch entry for remote camera startup

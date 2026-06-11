@@ -1,15 +1,27 @@
 # 天工 VLA 数据采集工程
 
-本工程用于天工 2.0 PRO 的 VLA 数据采集，负责按固定频率采集三路 RGB 图像、机械臂 command/state、灵巧手 command/state，并保存为旧项目兼容的数据结构。最终稳定流程为：上位机启动相机与低头节点，`n2(AGX)` 在本机 `/dev/shm` 中采集，采完后自动上传回上位机数据目录。
+本工程用于天工 2.0 PRO 的 VLA 数据采集，负责按固定频率采集三路 RGB 图像、机械臂 command/state、灵巧手 command/state，并保存为旧项目兼容的数据结构。最终稳定流程为：上位机启动机器人侧相机与低头节点，采集 AGX 在本机内存盘中录制，采完后上传回上位机数据目录。
+
+## 硬件拓扑
+
+本项目对应的物理系统由下面几部分组成：
+
+- 天工 2.0 PRO 机器人本体，双臂末端安装因时 6 自由度灵巧手。
+- 同构遥操作臂，用于进入遥操作采集模式后人工示教。
+- 上位机，用于运行官方遥操作采集软件、启动/停止机器人侧相机节点，并保存最终数据集。
+- 机器人 x86 控制机，用于机器人 ROS 2 控制、机械臂/头部控制和状态发布。
+- 采集 AGX，用于订阅三路图像、机械臂与灵巧手话题，并把数据先写入本机 `/dev/shm` 内存盘。
+- 相机 AGX，用于连接左右手 Intel RealSense D405，并运行 D405 图像节点和 h264 转换进程。
+
+由于上位机跨设备订阅三路图像时偶发阻塞，最终选择在采集 AGX 上本地录制；由于 AGX 磁盘和内存资源有限，录制数据先写入 `/dev/shm`，每组采完后再上传到上位机长期保存。
 
 ## 最简单使用说明
 
-推荐稳定采集在 `n2` 运行，避免上位机远程订阅图像流时偶发阻塞。
+推荐稳定采集在采集 AGX 上运行，避免上位机远程订阅图像流时偶发阻塞。
 
-1. 启动相机节点：
+1. 在上位机项目目录启动相机节点：
 
 ```bash
-ssh tienkung
 cd /home/ubuntu/cbc_tienkung2.0_vla_collect_data
 bash scripts/start_vla_nodes.sh --no-move-head
 ```
@@ -31,11 +43,11 @@ python3 scripts/view_vla_cameras.py
 python3 scripts/view_vla_cameras.py --save-preview /tmp/vla_preview.jpg
 ```
 
-3. 在 n2 开始采集：
+3. 在采集 AGX 项目目录开始采集：
+
+脚本名中的 `n2` 是当前部署的历史命名，对外可理解为“采集 AGX”。
 
 ```bash
-ssh tienkung
-ssh n2
 cd /home/nvidia/cbc_tienkung2.0_vla_collect_data
 bash scripts/n2_dual_hands_collect.sh --target-hz 20
 ```
@@ -47,13 +59,13 @@ bash scripts/n2_dual_hands_collect.sh --target-hz 20
 - `3`：删除上一组数据
 - `q`：退出脚本
 
-n2 项目代码放在持久目录 `/home/nvidia/cbc_tienkung2.0_vla_collect_data`，重启不会清空；采集数据默认写入 tmpfs：
+采集 AGX 的项目代码放在持久目录 `/home/nvidia/cbc_tienkung2.0_vla_collect_data`，重启不会清空；采集数据默认写入 tmpfs：
 
 ```text
 /dev/shm/cbc_tienkung2.0_vla_collect_data/vla_recorded_data/dual_hands
 ```
 
-4. 上传到上位机并删除 n2 本地数据：
+4. 在采集 AGX 上传到上位机并删除本地数据：
 
 ```bash
 cd /home/nvidia/cbc_tienkung2.0_vla_collect_data
@@ -75,21 +87,19 @@ python3 scripts/dual_hands_collect.py --target-hz 20
 
 ## D405 USB 恢复
 
-n3 上的 D405 偶尔会出现 `No RealSense devices were found`、`rs-enumerate-devices` 无设备、或者 `lsusb` 有设备但相机节点仍找不到设备的情况。优先使用下面的软件重置流程，不需要机器人动作。
+相机 AGX 上的 D405 偶尔会出现 `No RealSense devices were found`、`rs-enumerate-devices` 无设备、或者 `lsusb` 有设备但相机节点仍找不到设备的情况。优先使用下面的软件重置流程，不需要机器人动作。
 
 1. 在上位机停止当前 VLA 节点：
 
 ```bash
-ssh tienkung
 cd /home/ubuntu/cbc_tienkung2.0_vla_collect_data
 bash scripts/stop_vla_nodes.sh
 tmux kill-session -t vla_camera_launch 2>/dev/null || true
 ```
 
-2. 重绑 n3 的 USB 主控：
+2. 在相机 AGX 上重绑 USB 主控：
 
 ```bash
-ssh n3
 printf 'nvidia\n' | sudo -S bash -lc '
 cd /sys/bus/platform/drivers/tegra-xusb
 echo 3610000.usb > unbind
@@ -109,7 +119,6 @@ rs-enumerate-devices 2>/dev/null | grep -E "Name|Serial Number|Physical Port" ||
 3. 重新启动节点：
 
 ```bash
-exit
 cd /home/ubuntu/cbc_tienkung2.0_vla_collect_data
 bash scripts/start_vla_nodes.sh --no-move-head
 ```
@@ -129,8 +138,8 @@ python3 scripts/view_vla_cameras.py --save-preview /tmp/vla_preview.jpg
 - `scripts/gripper_vla_collect.py`：加爪/夹爪采集程序模板，内部有独立 `main()`，后续确认爪子话题后直接运行这个文件。
 - `scripts/view_vla_cameras.py`：三路相机预览脚本，用于采集前确认视角。
 - `scripts/recover_vla_streams.sh`：相机流自动恢复脚本，采集器等待启动时可自动调用。
-- `scripts/n2_dual_hands_collect.sh`：n2 tmpfs 采集入口，自动 source n2 的 `bodyctrl_msgs` 环境。
-- `scripts/upload_n2_recorded_data.sh`：把 n2 tmpfs 中的采集数据上传到上位机 `dual_hands/` 并删除本地副本。
+- `scripts/n2_dual_hands_collect.sh`：采集 AGX 的 tmpfs 采集入口，自动 source 机器人侧消息环境；脚本名中的 `n2` 是当前设备命名遗留。
+- `scripts/upload_n2_recorded_data.sh`：把采集 AGX tmpfs 中的数据上传到上位机 `dual_hands/` 并删除本地副本；脚本名中的 `n2` 是当前设备命名遗留。
 - `launch/vla_camera_nodes.launch.py`：推荐的一键启动入口，用独立进程启动每个远端相机节点。
 - `scripts/start_vla_nodes.sh`：兼容包装，内部调用 `launch/vla_camera_nodes.launch.py`。
 - `scripts/stop_vla_nodes.sh`：停止相机节点，便于重新启动。
@@ -143,8 +152,8 @@ python3 scripts/view_vla_cameras.py --save-preview /tmp/vla_preview.jpg
 1. 确认机器人已进入安全的 VLA 初始状态。
 2. 使用 `bash scripts/start_vla_nodes.sh` 启动全部相机并默认低头；如果头已经低下去了，使用 `bash scripts/start_vla_nodes.sh --no-move-head`。
 3. 检查图像、机械臂和灵巧手话题 publisher 与频率。
-4. 稳定采集优先登录 `n2`，运行 `bash scripts/n2_dual_hands_collect.sh --target-hz 20`，终端输入 `1` 开始、`2` 停止、`3` 删除上一组、`q` 退出。
-5. 采完后在 n2 运行 `bash scripts/upload_n2_recorded_data.sh`，上传到上位机 `vla_recorded_data/dual_hands/` 并清理 n2 tmpfs。
+4. 稳定采集优先在采集 AGX 运行 `bash scripts/n2_dual_hands_collect.sh --target-hz 20`，终端输入 `1` 开始、`2` 停止、`3` 删除上一组、`q` 退出。
+5. 采完后在采集 AGX 运行 `bash scripts/upload_n2_recorded_data.sh`，上传到上位机 `vla_recorded_data/dual_hands/` 并清理本机 tmpfs。
 6. 查看每组三路 PNG 数量和 `arm.npz` 数组形状，确认图像、机械臂和手部状态已保存。
 
 ## 双手采集
@@ -246,12 +255,12 @@ bash scripts/start_vla_nodes.sh
 
 该脚本会：
 
-- 在 `n3` 执行旧项目稳定使用的 `/home/nvidia/njd/env_init.sh`，由它启动左右 D405 和原有转换进程。
-- 在 `n2` 执行旧项目稳定使用的 `/home/nvidia/njd/button/tool/start_camera.sh` 启动头部 Orbbec。
+- 在相机 AGX 执行旧项目稳定使用的 `/home/nvidia/njd/env_init.sh`，由它启动左右 D405 和原有转换进程。
+- 在采集 AGX 执行旧项目稳定使用的 `/home/nvidia/njd/button/tool/start_camera.sh` 启动头部 Orbbec。
 - 保持原有发布话题：头部 compressed RGB、左右手 h264 RGB。
 - 当前相机启动已降分辨率：头部 Orbbec 为 `640x480x30`，左右 D405 为 `424x240x30`；采集器默认按相机输出尺寸保存 PNG。
 - D405 启动脚本显式关闭深度、红外、IMU、点云、TF 和 diagnostics；`extrinsics/depth_to_color` 属于外参标定话题，不是深度图像流。
-- 默认在 `n1` 发布一次低头命令，方便 VLA 采集视角。
+- 默认在机器人 x86 控制机发布一次低头命令，方便 VLA 采集视角。
 
 这个 launch 只负责把之前“多个终端分别挂相机节点”的稳定流程纳入一个入口，方便启动和停止；不在这里重写相机驱动参数。
 
@@ -269,7 +278,7 @@ cd /home/ubuntu/cbc_tienkung2.0_vla_collect_data
 ros2 launch launch/vla_camera_nodes.launch.py move_head:=true
 ```
 
-低头命令会在 `n1` 发布 `/head/cmd_pos`，属于机器人动作；只有确认周边安全、急停可用、机器人姿态允许时才使用。
+低头命令会在机器人 x86 控制机发布 `/head/cmd_pos`，属于机器人动作；只有确认周边安全、急停可用、机器人姿态允许时才使用。
 
 需要重新启动相机节点时：
 
