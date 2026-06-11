@@ -60,6 +60,7 @@ class VLACollectNode(Node):
 
         self.latest_arm_cmd: Optional[List[float]] = None
         self.latest_arm_status: Optional[List[float]] = None
+        self.latest_arm_cmd_by_id: Dict[int, float] = {}
         self.latest_left_hand_cmd: Optional[List[float]] = None
         self.latest_right_hand_cmd: Optional[List[float]] = None
         self.latest_left_hand_state: Optional[List[float]] = None
@@ -181,9 +182,15 @@ class VLACollectNode(Node):
                 continue
             if joint_id in self.arm_joint_ids:
                 positions[joint_id] = float(cmd.pos)
-        if all(joint_id in positions for joint_id in self.arm_joint_ids):
-            with self.lock:
-                self.latest_arm_cmd = [positions[joint_id] for joint_id in self.arm_joint_ids]
+        if not positions:
+            return
+        with self.lock:
+            self.latest_arm_cmd_by_id.update(positions)
+            # 遥操模式下左右臂 command 会交替发布，每条消息通常只带 7 个关节。
+            # 因此这里累计两侧最新 command，凑齐 14 个关节后再认为 command 数据流就绪。
+            if not all(joint_id in self.latest_arm_cmd_by_id for joint_id in self.arm_joint_ids):
+                return
+            self.latest_arm_cmd = [self.latest_arm_cmd_by_id[joint_id] for joint_id in self.arm_joint_ids]
 
     def on_arm_status(self, msg: MotorStatusMsg) -> None:
         positions = {}
