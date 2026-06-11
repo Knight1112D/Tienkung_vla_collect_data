@@ -3,8 +3,6 @@
 
 set -euo pipefail
 
-PROJECT_DIR="/home/ubuntu/cbc_tienkung2.0_vla_collect_data"
-
 need_head=0
 need_hand=0
 
@@ -26,7 +24,7 @@ done
 
 if [[ "$need_head" -eq 1 ]]; then
   echo "[recover] 重启 n2 头部 Orbbec 相机"
-  ssh n2 "bash -lc '
+  head_command='
 set -e
 pkill -f \"orbbec_camera gemini_330_series|camera_container\" 2>/dev/null || true
 sleep 2
@@ -39,7 +37,12 @@ cd /home/nvidia/njd/button
 source install/setup.bash
 cd tool
 nohup ./start_camera.sh > /tmp/vla_head_camera_restart.log 2>&1 &
-'"
+'
+  if [[ -x /home/nvidia/njd/button/tool/start_camera.sh ]]; then
+    bash -lc "$head_command"
+  else
+    ssh n2 "bash -lc '$head_command'"
+  fi
 fi
 
 if [[ "$need_hand" -eq 1 ]]; then
@@ -56,7 +59,9 @@ fi
 
 sleep 8
 
+set +u
 source /opt/ros/humble/setup.bash 2>/dev/null || true
+set -u
 for topic in \
   /camera/color/image_raw/compressed \
   /camera/d405_left/color/image_h264 \
