@@ -45,6 +45,8 @@ Data is saved by default to:
 /home/ubuntu/cbc_tienkung2.0_vla_collect_data/vla_recorded_data/dual_hands
 ```
 
+The default workflow records directly on the upper computer, so no n3 upload step is required.
+
 ## Camera Startup And Shutdown
 
 Start all camera nodes:
@@ -142,7 +144,7 @@ Recordings are grouped by collection type first, then by numbered episode direct
 ```text
 vla_recorded_data/
   dual_hands/
-    0001/
+    0000/
       head/
         000000.png
         ...
@@ -154,7 +156,7 @@ vla_recorded_data/
         ...
       arm.npz
   gripper/
-    0001/
+    0000/
       head/
       hand_left/
       hand_right/
@@ -162,6 +164,10 @@ vla_recorded_data/
 ```
 
 `scripts/dual_hands_collect.py` writes to `dual_hands/` by default. `scripts/gripper_vla_collect.py` writes to `gripper/` by default. Use `--output-dir` to override either location.
+
+Episode numbering continues from the largest numeric directory in the output folder. An empty folder starts at `0000`, then continues as `0001`, `0002`, and so on.
+
+The GitHub repository keeps only one complete sample episode for format inspection, currently `vla_recorded_data/dual_hands/0000`. The upper computer may keep the full local collection sequence, such as `0000` through `0010`.
 
 Main `arm.npz` fields:
 

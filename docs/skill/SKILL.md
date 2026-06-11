@@ -42,14 +42,15 @@ source /home/ubuntu/ros2ws/install/setup.bash
 2. 当前工程入口按用途拆分：`scripts/dual_hands_collect.py` 用于双手采集，`scripts/gripper_vla_collect.py` 用于后续加爪/夹爪采集；不要恢复单独的 `cbc_tienkung2.0_vla_dual_hands_collect_data.py`。
 3. 参考旧稳定项目：`/home/nvidia/njd/vla/remote_control/collect_data.py` 和 `/home/nvidia/njd/vla/remote_control/vla_recorded_data`。当前任务是在旧稳定链路基础上做工程化封装，不重新设计底层相机驱动。
 4. 一键启动入口是 `scripts/start_vla_nodes.sh`。它默认启动全部相机并让机器人低头；如果只启动相机、不执行动作，使用 `bash scripts/start_vla_nodes.sh --no-move-head`。
-5. `launch/vla_camera_nodes.launch.py` 只负责托管旧稳定启动脚本：`n3` 执行 `/home/nvidia/njd/env_init.sh`，`n2` 执行 `/home/nvidia/njd/button/tool/start_camera.sh`，`n1` 根据 `move_head` 参数发布一次低头命令。不要再把它改回直接启动低层 D405 raw 节点。
-6. 当前默认图像话题必须沿用旧稳定话题：头部 `/camera/color/image_raw/compressed`，左手 `/camera/d405_left/color/image_h264`，右手 `/camera/d405_right/color/image_h264`。
-7. D405 启动脚本应显式关闭深度、红外、IMU、点云、TF 和 diagnostics；`extrinsics/depth_to_color` 是外参标定话题，不是深度图像流，通常不构成带宽瓶颈。
-8. 采集目标频率为 `20Hz`，但实际写入频率由三路图像和必需 state 的真实更新决定；有新数据才写样本，不用旧数据凑频率。
-9. 采集器必须避免复用：开始录制时丢弃录制前缓存；每条样本写入后标记已使用的图像和状态 seq；下一条样本必须拿到新的关键图像和新的必需状态流，否则跳过。
-10. command/state 频率明显高于相机频率时，以图像帧时间为锚点选取最近状态，但同一条状态不能重复写入多个样本。
-11. 图像优先让相机驱动或旧稳定转换链路直接输出训练可用 RGB；如果不能直接输出 `224x224`，采集脚本不要在录制时 resize，直接保存相机输出并记录元数据。
-12. 每条样本记录各数据源原始时间戳和相对锚点时间差，便于后处理筛选。
+5. 采集前可运行 `python3 scripts/view_vla_cameras.py` 查看三路画面；无图形界面时用 `python3 scripts/view_vla_cameras.py --save-preview /tmp/vla_preview.jpg` 保存三路拼图。
+6. `launch/vla_camera_nodes.launch.py` 只负责托管旧稳定启动脚本：`n3` 执行 `/home/nvidia/njd/env_init.sh`，`n2` 执行 `/home/nvidia/njd/button/tool/start_camera.sh`，`n1` 根据 `move_head` 参数发布一次低头命令。不要再把它改回直接启动低层 D405 raw 节点。
+7. 当前默认图像话题必须沿用旧稳定话题：头部 `/camera/color/image_raw/compressed`，左手 `/camera/d405_left/color/image_h264`，右手 `/camera/d405_right/color/image_h264`。
+8. D405 启动脚本应显式关闭深度、红外、IMU、点云、TF 和 diagnostics；`extrinsics/depth_to_color` 是外参标定话题，不是深度图像流，通常不构成带宽瓶颈。
+9. 采集目标频率为固定 `20Hz`。各话题回调只维护最新缓存，新图像或新状态到来就替换旧缓存；录制线程每 50ms 保存当前快照，允许复用上一帧图像和状态以保持固定训练频率。
+10. 采集输出必须贴旧项目格式：每组目录只有 `head/`、`hand_left/`、`hand_right/` 三路 PNG 序列和一个 `arm.npz`。不要再写 `samples.jsonl`、`summary.json`、`config.json` 或逐帧 `state_npz/`。
+11. `arm.npz` 至少保存机械臂 `cmd_positions`、`status_positions`、关节 id、左右手 state；左右手 command 也订阅并保存，如果当前话题不发布新消息，则保存为空数组，不伪造 command。
+12. 图像保存必须参考旧 VLA 实现：解码后直接保存 PNG，默认保持相机输出尺寸，不在采集脚本里 resize。相机启动阶段可以降低分辨率以减少带宽和磁盘；当前头部 Orbbec 为 `640x480x30`，左右 D405 为 `424x240x30`。
+13. 各主机时钟可能不同步，不要依赖跨主机 ROS stamp 做强对齐；如需检查复用和新鲜度，使用采集器写入的接收时间和图像 seq。
 
 ### 相机与话题检查
 

@@ -51,17 +51,7 @@ python3 scripts/dual_hands_collect.py --target-hz 20
 /home/ubuntu/cbc_tienkung2.0_vla_collect_data/vla_recorded_data/dual_hands
 ```
 
-4. 如果以后改为在 n3 本机采集，再把数据上传到上位机：
-
-```bash
-ssh tienkung
-ssh n3
-cd /home/nvidia/cbc_tienkung2.0_vla_collect_data
-bash scripts/upload_recorded_data.sh --dry-run
-bash scripts/upload_recorded_data.sh
-```
-
-当前默认流程是在上位机采集，上面这一步通常不需要执行。
+4. 当前默认流程是在上位机采集并直接落盘，不再需要从 n3 上传数据。
 
 ## D405 USB 恢复
 
@@ -156,36 +146,6 @@ python3 scripts/dual_hands_collect.py \
 
 D405 默认沿用旧项目中已经稳定验证过的 h264 图像话题。采集器按 `20Hz` 固定保存当前最新缓存；新图像到来会替换缓存，没有新图像时允许复用上一帧，以保持固定训练采样频率。默认保存 PNG 保持相机输出尺寸，不做 resize；如需临时缩放可显式传 `--output-image-size 224`。
 
-## 在 n3 本机采集的备选方案
-
-当前优先仍是在上位机运行采集器，因为上位机磁盘空间充足，并且已经具备 `bodyctrl_msgs` 等自定义消息环境。如果后续需要把采集器放到 `n3` 本机运行，原因只应该是手部图像跨机传输成为瓶颈，而不是改变原来稳定的相机启动方式。
-
-备选方案的限制：
-
-- `n3` 内存和磁盘更有限，只适合短时采集后及时回传。
-- `n3` 需要能 source 到 `bodyctrl_msgs` 等自定义消息环境，否则无法解析机械臂消息。
-- 回传建议使用上位机有线 IP，例如 `192.168.41.5`。
-
-采集器不负责上传，避免录制交互变复杂。采集完成后在 `n3` 单独运行上传脚本，把本地所有编号数据上传到上位机；脚本会先查看远端目标目录已有最大编号，再按顺序把本地目录上传为远端后续编号，上传成功后删除本地目录，避免覆盖或编号乱序：
-
-```bash
-cd /home/nvidia/cbc_tienkung2.0_vla_collect_data
-python3 scripts/upload_recorded_data.py \
-  --local-dir /home/nvidia/cbc_tienkung2.0_vla_collect_data/vla_recorded_data \
-  --remote-dir ubuntu@192.168.41.5:/home/ubuntu/cbc_tienkung2.0_vla_collect_data/vla_recorded_data_from_n3
-```
-
-上传前建议先 dry-run 检查编号计划：
-
-```bash
-python3 scripts/upload_recorded_data.py \
-  --local-dir /home/nvidia/cbc_tienkung2.0_vla_collect_data/vla_recorded_data \
-  --remote-dir ubuntu@192.168.41.5:/home/ubuntu/cbc_tienkung2.0_vla_collect_data/vla_recorded_data_from_n3 \
-  --dry-run
-```
-
-如果只是测试上传流程、不想删除本地数据，加 `--keep-local`。
-
 ## 加爪/夹爪采集
 
 当前固定格式采集器主要面向双手采集。加爪/夹爪采集需要先确认爪子消息类型，再在 `cbc_tienkung_vla/collector.py` 中新增对应最新缓存和 `arm.npz` 字段。
@@ -197,20 +157,22 @@ python3 scripts/upload_recorded_data.py \
 ```text
 vla_recorded_data/
   dual_hands/
-    0001/
+    0000/
       head/
       hand_left/
       hand_right/
       arm.npz
   gripper/
-    0001/
+    0000/
       head/
       hand_left/
       hand_right/
       arm.npz
 ```
 
-其中 `scripts/dual_hands_collect.py` 默认写入 `dual_hands/`，`scripts/gripper_vla_collect.py` 默认写入 `gripper/`。也可以用 `--output-dir` 显式覆盖。
+其中 `scripts/dual_hands_collect.py` 默认写入 `dual_hands/`，`scripts/gripper_vla_collect.py` 默认写入 `gripper/`。也可以用 `--output-dir` 显式覆盖。编号从当前目录下最大数字目录继续递增；空目录第一次采集会生成 `0000`，之后依次为 `0001`、`0002`。
+
+GitHub 仓库只保留一组完整样例数据用于检查格式，当前样例为 `vla_recorded_data/dual_hands/0000`。上位机本地可以保留完整采集序列，例如 `0000` 到 `0010`。
 
 每组编号目录内部结构：
 
