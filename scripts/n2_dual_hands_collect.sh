@@ -4,7 +4,7 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_DIR/vla_recorded_data/dual_hands}"
+OUTPUT_DIR="${OUTPUT_DIR:-/dev/shm/cbc_tienkung2.0_vla_collect_data/vla_recorded_data/dual_hands}"
 
 set +u
 source /opt/ros/humble/setup.bash

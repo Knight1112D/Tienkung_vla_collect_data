@@ -52,16 +52,18 @@ If camera subscription on the upper computer stalls for a long time, record on n
 ```bash
 ssh tienkung
 ssh n2
-cd /dev/shm/cbc_tienkung2.0_vla_collect_data
+cd /home/nvidia/cbc_tienkung2.0_vla_collect_data
 bash scripts/n2_dual_hands_collect.sh --target-hz 20
 ```
 
 After recording, upload the n2 data to the upper computer and remove the local n2 copy:
 
 ```bash
-cd /dev/shm/cbc_tienkung2.0_vla_collect_data
+cd /home/nvidia/cbc_tienkung2.0_vla_collect_data
 bash scripts/upload_n2_recorded_data.sh
 ```
+
+The n2 project lives in persistent storage at `/home/nvidia/cbc_tienkung2.0_vla_collect_data`, so it survives reboot. Recorded episodes are written to `/dev/shm/cbc_tienkung2.0_vla_collect_data/vla_recorded_data/dual_hands` by default and are removed after a successful upload.
 
 ## Camera Startup And Shutdown
 

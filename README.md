@@ -58,16 +58,18 @@ python3 scripts/dual_hands_collect.py --target-hz 20
 ```bash
 ssh tienkung
 ssh n2
-cd /dev/shm/cbc_tienkung2.0_vla_collect_data
+cd /home/nvidia/cbc_tienkung2.0_vla_collect_data
 bash scripts/n2_dual_hands_collect.sh --target-hz 20
 ```
 
 采完后从 n2 上传到上位机并删除 n2 本地数据：
 
 ```bash
-cd /dev/shm/cbc_tienkung2.0_vla_collect_data
+cd /home/nvidia/cbc_tienkung2.0_vla_collect_data
 bash scripts/upload_n2_recorded_data.sh
 ```
+
+n2 项目代码放在持久目录 `/home/nvidia/cbc_tienkung2.0_vla_collect_data`，重启不会清空；采集数据默认写入 `/dev/shm/cbc_tienkung2.0_vla_collect_data/vla_recorded_data/dual_hands`，上传成功后会删除本地 tmpfs 数据。
 
 ## D405 USB 恢复
 

@@ -52,7 +52,7 @@ source /home/ubuntu/ros2ws/install/setup.bash
 12. `arm.npz` 至少保存机械臂 `cmd_positions`、`status_positions`、关节 id、左右手 state；左右手 command 也订阅并保存，如果当前话题不发布新消息，则保存为空数组，不伪造 command。
 13. 图像保存必须参考旧 VLA 实现：解码后直接保存 PNG，默认保持相机输出尺寸，不在采集脚本里 resize。相机启动阶段可以降低分辨率以减少带宽和磁盘；当前头部 Orbbec 为 `640x480x30`，左右 D405 为 `424x240x30`。
 14. 各主机时钟可能不同步，不要依赖跨主机 ROS stamp 做强对齐；如需检查复用和新鲜度，使用采集器写入的接收时间和图像 seq。
-15. 如果上位机订阅相机流长时间阻塞，使用 n2 tmpfs 方案：项目同步到 `/dev/shm/cbc_tienkung2.0_vla_collect_data`，运行 `bash scripts/n2_dual_hands_collect.sh --target-hz 20` 采集，采完运行 `bash scripts/upload_n2_recorded_data.sh` 上传到上位机 `dual_hands/` 并删除 n2 本地数据。
+15. 如果上位机订阅相机流长时间阻塞，使用 n2 tmpfs 方案：项目持久目录为 `/home/nvidia/cbc_tienkung2.0_vla_collect_data`，运行 `bash scripts/n2_dual_hands_collect.sh --target-hz 20` 采集；数据默认写入 `/dev/shm/cbc_tienkung2.0_vla_collect_data/vla_recorded_data/dual_hands`，采完运行 `bash scripts/upload_n2_recorded_data.sh` 上传到上位机 `dual_hands/` 并删除 n2 本地数据。
 
 ### 相机与话题检查
 

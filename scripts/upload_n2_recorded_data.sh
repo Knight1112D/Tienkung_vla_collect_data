@@ -4,7 +4,7 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LOCAL_DIR="${LOCAL_DIR:-$PROJECT_DIR/vla_recorded_data/dual_hands}"
+LOCAL_DIR="${LOCAL_DIR:-/dev/shm/cbc_tienkung2.0_vla_collect_data/vla_recorded_data/dual_hands}"
 REMOTE_HOST="${REMOTE_HOST:-ubuntu@192.168.41.5}"
 REMOTE_DIR="${REMOTE_DIR:-/home/ubuntu/cbc_tienkung2.0_vla_collect_data/vla_recorded_data/dual_hands}"
 DRY_RUN=0
