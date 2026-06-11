@@ -42,7 +42,7 @@ Recorder controls:
 Data is saved by default to:
 
 ```text
-/home/ubuntu/cbc_tienkung2.0_vla_collect_data/vla_recorded_data
+/home/ubuntu/cbc_tienkung2.0_vla_collect_data/vla_recorded_data/dual_hands
 ```
 
 ## Camera Startup And Shutdown
@@ -137,22 +137,31 @@ Hand streams:
 
 ## Output Format
 
-Each recording creates one numbered episode directory:
+Recordings are grouped by collection type first, then by numbered episode directories:
 
 ```text
 vla_recorded_data/
-  0000/
-    head/
-      000000.png
-      ...
-    hand_left/
-      000000.png
-      ...
-    hand_right/
-      000000.png
-      ...
-    arm.npz
+  dual_hands/
+    0001/
+      head/
+        000000.png
+        ...
+      hand_left/
+        000000.png
+        ...
+      hand_right/
+        000000.png
+        ...
+      arm.npz
+  gripper/
+    0001/
+      head/
+      hand_left/
+      hand_right/
+      arm.npz
 ```
+
+`scripts/dual_hands_collect.py` writes to `dual_hands/` by default. `scripts/gripper_vla_collect.py` writes to `gripper/` by default. Use `--output-dir` to override either location.
 
 Main `arm.npz` fields:
 
@@ -192,4 +201,3 @@ The collector can start once all three image streams, arm command/state, and han
 - `scripts/stop_vla_nodes.sh`: camera shutdown wrapper
 - `launch/vla_camera_nodes.launch.py`: ROS 2 launch entry for remote camera startup
 - `configs/`: example command-line configurations
-

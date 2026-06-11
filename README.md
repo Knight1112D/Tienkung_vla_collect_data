@@ -48,7 +48,7 @@ python3 scripts/dual_hands_collect.py --target-hz 20
 数据默认保存到：
 
 ```text
-/home/ubuntu/cbc_tienkung2.0_vla_collect_data/vla_recorded_data
+/home/ubuntu/cbc_tienkung2.0_vla_collect_data/vla_recorded_data/dual_hands
 ```
 
 4. 如果以后改为在 n3 本机采集，再把数据上传到上位机：
@@ -192,7 +192,27 @@ python3 scripts/upload_recorded_data.py \
 
 ## 数据格式
 
-每次录制生成一个递增编号目录：
+每次录制会先按采集类型分目录，再生成递增编号目录：
+
+```text
+vla_recorded_data/
+  dual_hands/
+    0001/
+      head/
+      hand_left/
+      hand_right/
+      arm.npz
+  gripper/
+    0001/
+      head/
+      hand_left/
+      hand_right/
+      arm.npz
+```
+
+其中 `scripts/dual_hands_collect.py` 默认写入 `dual_hands/`，`scripts/gripper_vla_collect.py` 默认写入 `gripper/`。也可以用 `--output-dir` 显式覆盖。
+
+每组编号目录内部结构：
 
 - `head/`、`hand_left/`、`hand_right/`：三路 PNG 序列，文件名为 `000000.png` 递增。
 - `arm.npz`：逐帧状态和命令数组。

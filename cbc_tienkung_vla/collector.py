@@ -419,10 +419,13 @@ def parse_named_topic(value: str) -> Tuple[str, str]:
     return name, topic
 
 
-def build_arg_parser(description: str = "天工 VLA 固定频率数据采集脚本") -> argparse.ArgumentParser:
+def build_arg_parser(
+    description: str = "天工 VLA 固定频率数据采集脚本",
+    default_output_dir: str = "/home/ubuntu/cbc_tienkung2.0_vla_collect_data/vla_recorded_data",
+) -> argparse.ArgumentParser:
     """构建采集参数。"""
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument("--output-dir", default="/home/ubuntu/cbc_tienkung2.0_vla_collect_data/vla_recorded_data", help="采集数据根目录")
+    parser.add_argument("--output-dir", default=default_output_dir, help="采集数据根目录")
     parser.add_argument("--target-hz", type=float, default=20.0, help="固定保存频率，默认 20Hz")
     parser.add_argument("--output-image-size", type=int, default=0, help="保存 PNG 的正方形边长；默认 0 表示保留相机输出尺寸")
     parser.add_argument("--head-topic", default="/camera/color/image_raw/compressed", help="头部相机 RGB 话题")
