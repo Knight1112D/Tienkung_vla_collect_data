@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
-"""加爪/夹爪 VLA 采集入口。
+"""双夹爪 VLA 采集入口。
 
-示例：
-python3 scripts/gripper_vla_collect.py \
-  --extra-joint-state-topic left_gripper_state=/TODO/left_gripper/state \
-  --extra-joint-state-topic right_gripper_state=/TODO/right_gripper/state \
-  --required-state-streams arm_cmd,arm_status,left_hand_state,right_hand_state,left_gripper_state,right_gripper_state
+左右末端都按 1 自由度夹爪保存。夹爪话题暂时留空，实机确认后通过
+--left-hand-state-topic 和 --right-hand-state-topic 传入。
 """
 
 from pathlib import Path
@@ -22,8 +19,17 @@ DEFAULT_OUTPUT_DIR = "/home/ubuntu/cbc_tienkung2.0_vla_collect_data/vla_recorded
 
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
-    """加爪/夹爪采集入口。"""
-    parser = build_arg_parser(description="天工 VLA 加爪/夹爪数据采集脚本", default_output_dir=DEFAULT_OUTPUT_DIR)
+    """双夹爪采集入口。"""
+    parser = build_arg_parser(
+        description="天工 VLA 双夹爪数据采集脚本",
+        default_output_dir=DEFAULT_OUTPUT_DIR,
+        default_left_hand_cmd_topic="",
+        default_right_hand_cmd_topic="",
+        default_left_hand_state_topic="",
+        default_right_hand_state_topic="",
+        default_left_hand_dof=1,
+        default_right_hand_dof=1,
+    )
     args = parser.parse_args(argv)
     run_collector(args)
 

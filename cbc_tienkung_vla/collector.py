@@ -111,10 +111,10 @@ class VLACollectNode(Node):
 
         self._owned_subscriptions.append(self.create_subscription(CmdMotorCtrl, self.args.arm_cmd_topic, self.on_arm_cmd, state_qos))
         self._owned_subscriptions.append(self.create_subscription(MotorStatusMsg, self.args.arm_status_topic, self.on_arm_status, state_qos))
-        self._owned_subscriptions.append(self.create_subscription(JointState, self.args.left_hand_cmd_topic, lambda msg: self.on_joint_state("left_hand_cmd", msg), state_qos))
-        self._owned_subscriptions.append(self.create_subscription(JointState, self.args.right_hand_cmd_topic, lambda msg: self.on_joint_state("right_hand_cmd", msg), state_qos))
-        self._owned_subscriptions.append(self.create_subscription(JointState, self.args.left_hand_state_topic, lambda msg: self.on_joint_state("left_hand_state", msg), state_qos))
-        self._owned_subscriptions.append(self.create_subscription(JointState, self.args.right_hand_state_topic, lambda msg: self.on_joint_state("right_hand_state", msg), state_qos))
+        self.create_joint_state_subscription("left_hand_cmd", self.args.left_hand_cmd_topic, state_qos)
+        self.create_joint_state_subscription("right_hand_cmd", self.args.right_hand_cmd_topic, state_qos)
+        self.create_joint_state_subscription("left_hand_state", self.args.left_hand_state_topic, state_qos)
+        self.create_joint_state_subscription("right_hand_state", self.args.right_hand_state_topic, state_qos)
 
     def create_image_subscription(self, name: str, topic: str, image_type: str, qos: Any) -> None:
         """根据图像消息类型订阅话题。"""
@@ -126,6 +126,13 @@ class VLACollectNode(Node):
             self._owned_subscriptions.append(self.create_subscription(Image, topic, lambda msg: self.on_raw_image(name, msg), qos))
         else:
             raise ValueError(f"未知图像类型: {image_type}")
+
+    def create_joint_state_subscription(self, name: str, topic: str, qos: Any) -> None:
+        """订阅手部或夹爪 JointState；话题为空时跳过，便于先预留采集方案。"""
+        if not topic:
+            self.get_logger().warn(f"{name} 话题为空，当前不会订阅该数据流。")
+            return
+        self._owned_subscriptions.append(self.create_subscription(JointState, topic, lambda msg: self.on_joint_state(name, msg), qos))
 
     def on_compressed_image(self, name: str, msg: CompressedImage) -> None:
         self.update_image(name, bytes(msg.data), ros_time_to_sec(msg.header.stamp), compressed=True)
@@ -233,8 +240,8 @@ class VLACollectNode(Node):
                 self.latest_arm_status_error = [errors[joint_id] for joint_id in self.arm_joint_ids]
 
     def on_joint_state(self, name: str, msg: JointState) -> None:
-        positions = [float(item) for item in msg.position]
-        names = list(msg.name)
+        positions = self.slice_joint_positions(name, msg.position)
+        names = self.slice_joint_names(name, msg.name)
         with self.lock:
             if name == "left_hand_cmd":
                 self.latest_left_hand_cmd = positions
@@ -248,6 +255,32 @@ class VLACollectNode(Node):
             elif name == "right_hand_state":
                 self.latest_right_hand_state = positions
                 self.histories["right_hand_state_names_latest"] = names
+
+    def slice_joint_positions(self, name: str, positions: Sequence[float]) -> List[float]:
+        """按配置截取末端自由度；0 表示保存消息中的全部 position。"""
+        dof = self.get_terminal_dof(name)
+        values = [float(item) for item in positions]
+        if dof <= 0:
+            return values
+        return values[:dof]
+
+    def slice_joint_names(self, name: str, names: Sequence[str]) -> List[str]:
+        """按配置截取末端关节名，保证元信息与 position 维度一致。"""
+        dof = self.get_terminal_dof(name)
+        values = [str(item) for item in names]
+        if dof <= 0:
+            return values
+        return values[:dof]
+
+    def get_terminal_dof(self, name: str) -> int:
+        """查询某个末端通道需要保存的自由度数。"""
+        dof_by_name = {
+            "left_hand_cmd": self.args.left_hand_dof,
+            "left_hand_state": self.args.left_hand_dof,
+            "right_hand_cmd": self.args.right_hand_dof,
+            "right_hand_state": self.args.right_hand_dof,
+        }
+        return int(dof_by_name.get(name, 0))
 
     def terminal_listener(self) -> None:
         print("\n" + "=" * 40)
@@ -473,9 +506,11 @@ class VLACollectNode(Node):
         checks = {
             "arm_cmd": self.latest_arm_cmd,
             "arm_status": self.latest_arm_status,
-            "left_hand_state": self.latest_left_hand_state,
-            "right_hand_state": self.latest_right_hand_state,
         }
+        if self.args.left_hand_state_topic:
+            checks["left_hand_state"] = self.latest_left_hand_state
+        if self.args.right_hand_state_topic:
+            checks["right_hand_state"] = self.latest_right_hand_state
         missing.extend(name for name, value in checks.items() if value is None)
         return missing
 
@@ -519,6 +554,12 @@ def parse_named_topic(value: str) -> Tuple[str, str]:
 def build_arg_parser(
     description: str = "天工 VLA 固定频率数据采集脚本",
     default_output_dir: str = "/home/ubuntu/cbc_tienkung2.0_vla_collect_data/vla_recorded_data",
+    default_left_hand_cmd_topic: str = "/inspire_hand/ctrl/left_hand",
+    default_right_hand_cmd_topic: str = "/inspire_hand/ctrl/right_hand",
+    default_left_hand_state_topic: str = "/inspire_hand/state/left_hand",
+    default_right_hand_state_topic: str = "/inspire_hand/state/right_hand",
+    default_left_hand_dof: int = 0,
+    default_right_hand_dof: int = 0,
 ) -> argparse.ArgumentParser:
     """构建采集参数。"""
     parser = argparse.ArgumentParser(description=description)
@@ -533,10 +574,12 @@ def build_arg_parser(
     parser.add_argument("--right-hand-image-type", choices=["compressed_image", "compressed_video", "raw_image"], default="compressed_video", help="右手相机图像消息类型")
     parser.add_argument("--arm-cmd-topic", default="/arm/cmd_ctrl", help="机械臂 command 话题")
     parser.add_argument("--arm-status-topic", default="/arm/status", help="机械臂 state 话题")
-    parser.add_argument("--left-hand-cmd-topic", default="/inspire_hand/ctrl/left_hand", help="左灵巧手 command 话题")
-    parser.add_argument("--right-hand-cmd-topic", default="/inspire_hand/ctrl/right_hand", help="右灵巧手 command 话题")
-    parser.add_argument("--left-hand-state-topic", default="/inspire_hand/state/left_hand", help="左灵巧手 state 话题")
-    parser.add_argument("--right-hand-state-topic", default="/inspire_hand/state/right_hand", help="右灵巧手 state 话题")
+    parser.add_argument("--left-hand-cmd-topic", default=default_left_hand_cmd_topic, help="左手/左夹爪 command 话题；为空则不订阅")
+    parser.add_argument("--right-hand-cmd-topic", default=default_right_hand_cmd_topic, help="右手/右夹爪 command 话题；为空则不订阅")
+    parser.add_argument("--left-hand-state-topic", default=default_left_hand_state_topic, help="左手/左夹爪 state 话题；为空则不订阅且不作为启动必需流")
+    parser.add_argument("--right-hand-state-topic", default=default_right_hand_state_topic, help="右手/右夹爪 state 话题；为空则不订阅且不作为启动必需流")
+    parser.add_argument("--left-hand-dof", type=int, default=default_left_hand_dof, help="左手/左夹爪保存的 position 自由度数；0 表示保存全部")
+    parser.add_argument("--right-hand-dof", type=int, default=default_right_hand_dof, help="右手/右夹爪保存的 position 自由度数；0 表示保存全部")
     parser.add_argument("--auto-recover-streams", action=argparse.BooleanOptionalAction, default=True, help="等待启动时自动恢复缺失的相机流")
     parser.add_argument("--recover-after-sec", type=float, default=8.0, help="等待启动超过该秒数仍缺相机流时才自动恢复")
     parser.add_argument("--recover-interval-sec", type=float, default=20.0, help="自动恢复相机流的最小间隔秒数")
