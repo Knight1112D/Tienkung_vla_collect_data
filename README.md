@@ -313,6 +313,47 @@ python3 examples/tienkung/convert_tienkung_gripper_data_to_lerobot.py \
 
 两个脚本默认会排除 `0013` 作为留出轨迹；你可以通过 `--exclude-episodes` 修改，或者传 `--push-to-hub` 上传到 Hugging Face Hub。
 
+上位机夹爪数据转 NAS 的固定入口：
+
+```bash
+cd /home/ubuntu/cbc_tienkung2.0_vla_collect_data
+bash scripts/cbc_gripper_lerobot_to_nas.sh
+```
+
+脚本会提示输入 NAS 下的数据集文件夹名，默认读取：
+
+```text
+/home/ubuntu/cbc_tienkung2.0_vla_collect_data/vla_recorded_data/gripper
+```
+
+转换后的 LeRobot 数据集会同步到：
+
+```text
+192.168.41.6:/volume1/data/caobochun/<文件夹名>
+```
+
+同步成功后只删除上位机本地的临时 LeRobot 导出目录，不删除原始采集数据。
+
+从 NAS 继续同步到 A100_8：
+
+```bash
+cd /home/ubuntu/cbc_tienkung2.0_vla_collect_data
+bash scripts/cbc_nas_lerobot_to_a100.sh <文件夹名>
+```
+
+目标目录为：
+
+```text
+A100_8:/data/caobochun/<文件夹名>
+```
+
+如果现场 NAS 不是 `192.168.41.6`，可以临时覆盖：
+
+```bash
+NAS_HOST=<NAS地址或SSH别名> bash scripts/cbc_gripper_lerobot_to_nas.sh
+NAS_HOST=<NAS地址或SSH别名> bash scripts/cbc_nas_lerobot_to_a100.sh <文件夹名>
+```
+
 ## D405 手部相机支架资产
 
 `assets/` 目录保存了天工 2.0 PRO 搭配因时 6 自由度灵巧手时使用的 Intel RealSense D405 相机支架资料。支架安装在手腕/手部附近，使 D405 可以观察虎口和抓取区域；固定需要两颗 M3 螺丝。

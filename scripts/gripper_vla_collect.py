@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """双夹爪 VLA 采集入口。
 
-左右末端都按 1 自由度夹爪保存。夹爪话题暂时留空，实机确认后通过
---left-hand-state-topic 和 --right-hand-state-topic 传入。
+左右夹爪按 1 自由度保存。当前天工夹爪状态和命令话题为 UInt16，
+采集器会把数值写入 arm.npz 中左右末端 position 的第 1 维。
 """
 
 from pathlib import Path
@@ -23,10 +23,14 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     parser = build_arg_parser(
         description="天工 VLA 双夹爪数据采集脚本",
         default_output_dir=DEFAULT_OUTPUT_DIR,
-        default_left_hand_cmd_topic="",
-        default_right_hand_cmd_topic="",
-        default_left_hand_state_topic="",
-        default_right_hand_state_topic="",
+        default_left_hand_cmd_topic="/left_claw/command",
+        default_right_hand_cmd_topic="/right_claw/command",
+        default_left_hand_state_topic="/left_claw/status",
+        default_right_hand_state_topic="/right_claw/status",
+        default_left_hand_cmd_type="uint16",
+        default_right_hand_cmd_type="uint16",
+        default_left_hand_state_type="uint16",
+        default_right_hand_state_type="uint16",
         default_left_hand_dof=1,
         default_right_hand_dof=1,
     )

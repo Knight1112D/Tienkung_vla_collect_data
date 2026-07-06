@@ -47,7 +47,30 @@ def _episode_dirs(raw_dir: Path, exclude_episodes: set[str]) -> list[Path]:
     return [path for path in episode_dirs if path.name not in exclude_episodes]
 
 
-def _create_dataset(repo_id: str, *, root: Path, fps: int, overwrite: bool) -> LeRobotDataset:
+def _image_shape(path: Path) -> tuple[int, int, int]:
+    """读取一张图像的 HWC 形状，用于写入真实 LeRobot 元数据。"""
+    image = Image.open(path).convert("RGB")
+    width, height = image.size
+    return (height, width, 3)
+
+
+def _first_frame_shapes(episode_dir: Path) -> dict[str, tuple[int, int, int]]:
+    """读取首帧三路图像尺寸，避免相机分辨率调整后元数据写死。"""
+    return {
+        "base_image": _image_shape(episode_dir / "head" / "000000.png"),
+        "left_image": _image_shape(episode_dir / "hand_left" / "000000.png"),
+        "right_image": _image_shape(episode_dir / "hand_right" / "000000.png"),
+    }
+
+
+def _create_dataset(
+    repo_id: str,
+    *,
+    root: Path,
+    fps: int,
+    overwrite: bool,
+    image_shapes: dict[str, tuple[int, int, int]],
+) -> LeRobotDataset:
     """创建空的 LeRobot 数据集。"""
     output_path = root.expanduser().resolve()
     if output_path.exists():
@@ -63,17 +86,17 @@ def _create_dataset(repo_id: str, *, root: Path, fps: int, overwrite: bool) -> L
         features={
             "base_image": {
                 "dtype": "image",
-                "shape": (480, 640, 3),
+                "shape": image_shapes["base_image"],
                 "names": ["height", "width", "channel"],
             },
             "left_image": {
                 "dtype": "image",
-                "shape": (240, 424, 3),
+                "shape": image_shapes["left_image"],
                 "names": ["height", "width", "channel"],
             },
             "right_image": {
                 "dtype": "image",
-                "shape": (240, 424, 3),
+                "shape": image_shapes["right_image"],
                 "names": ["height", "width", "channel"],
             },
             "state": {
@@ -109,10 +132,16 @@ def convert(
     if not raw_dir.exists():
         raise FileNotFoundError(f"原始数据目录不存在: {raw_dir}")
 
-    dataset = _create_dataset(repo_id, root=root, fps=fps, overwrite=overwrite)
     train_episodes = _episode_dirs(raw_dir, set(exclude_episodes))
     if not train_episodes:
         raise ValueError(f"没有找到可转换的轨迹，raw_dir={raw_dir}")
+    dataset = _create_dataset(
+        repo_id,
+        root=root,
+        fps=fps,
+        overwrite=overwrite,
+        image_shapes=_first_frame_shapes(train_episodes[0]),
+    )
 
     for episode_dir in tqdm.tqdm(train_episodes, desc="转换轨迹"):
         arm_data = np.load(episode_dir / "arm.npz")
