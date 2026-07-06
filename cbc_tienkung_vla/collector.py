@@ -28,6 +28,7 @@ from foxglove_msgs.msg import CompressedVideo
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import CompressedImage, Image, JointState
+from std_msgs.msg import UInt16
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -56,6 +57,9 @@ class VLACollectNode(Node):
         self.last_wait_log_sec = 0.0
         self.last_wait_missing: Tuple[str, ...] = ()
         self.last_recover_sec = 0.0
+        self.last_checkpoint_sec = 0.0
+        self.button_pressed_state: Dict[str, bool] = {}
+        self.last_button_trigger_sec: Dict[str, float] = {}
 
         self.left_arm_joint_ids = list(range(11, 18))
         self.right_arm_joint_ids = list(range(21, 28))
@@ -111,10 +115,11 @@ class VLACollectNode(Node):
 
         self._owned_subscriptions.append(self.create_subscription(CmdMotorCtrl, self.args.arm_cmd_topic, self.on_arm_cmd, state_qos))
         self._owned_subscriptions.append(self.create_subscription(MotorStatusMsg, self.args.arm_status_topic, self.on_arm_status, state_qos))
-        self._owned_subscriptions.append(self.create_subscription(JointState, self.args.left_hand_cmd_topic, lambda msg: self.on_joint_state("left_hand_cmd", msg), state_qos))
-        self._owned_subscriptions.append(self.create_subscription(JointState, self.args.right_hand_cmd_topic, lambda msg: self.on_joint_state("right_hand_cmd", msg), state_qos))
-        self._owned_subscriptions.append(self.create_subscription(JointState, self.args.left_hand_state_topic, lambda msg: self.on_joint_state("left_hand_state", msg), state_qos))
-        self._owned_subscriptions.append(self.create_subscription(JointState, self.args.right_hand_state_topic, lambda msg: self.on_joint_state("right_hand_state", msg), state_qos))
+        self.create_terminal_subscription("left_hand_cmd", self.args.left_hand_cmd_topic, self.args.left_hand_cmd_type, state_qos)
+        self.create_terminal_subscription("right_hand_cmd", self.args.right_hand_cmd_topic, self.args.right_hand_cmd_type, state_qos)
+        self.create_terminal_subscription("left_hand_state", self.args.left_hand_state_topic, self.args.left_hand_state_type, state_qos)
+        self.create_terminal_subscription("right_hand_state", self.args.right_hand_state_topic, self.args.right_hand_state_type, state_qos)
+        self.create_button_subscription(state_qos)
 
     def create_image_subscription(self, name: str, topic: str, image_type: str, qos: Any) -> None:
         """根据图像消息类型订阅话题。"""
@@ -126,6 +131,29 @@ class VLACollectNode(Node):
             self._owned_subscriptions.append(self.create_subscription(Image, topic, lambda msg: self.on_raw_image(name, msg), qos))
         else:
             raise ValueError(f"未知图像类型: {image_type}")
+
+    def create_terminal_subscription(self, name: str, topic: str, msg_type: str, qos: Any) -> None:
+        """订阅末端执行器话题；话题为空时跳过，便于先预留采集方案。"""
+        if not topic:
+            self.get_logger().warn(f"{name} 话题为空，当前不会订阅该数据流。")
+            return
+        if msg_type == "joint_state":
+            self._owned_subscriptions.append(self.create_subscription(JointState, topic, lambda msg: self.on_joint_state(name, msg), qos))
+        elif msg_type == "uint16":
+            self._owned_subscriptions.append(self.create_subscription(UInt16, topic, lambda msg: self.on_uint16_terminal(name, msg), qos))
+        else:
+            raise ValueError(f"未知末端执行器消息类型: {msg_type}")
+
+    def create_button_subscription(self, qos: Any) -> None:
+        """订阅外部按钮话题，用按钮边沿触发开始和停止采集。"""
+        if not self.args.button_topic:
+            return
+        self._owned_subscriptions.append(self.create_subscription(JointState, self.args.button_topic, self.on_button_state, qos))
+        self.get_logger().info(
+            f"已启用按钮控制: {self.args.button_topic}，"
+            f"开始={self.args.start_button_name or self.args.start_button_index}，"
+            f"停止={self.args.stop_button_name or self.args.stop_button_index}"
+        )
 
     def on_compressed_image(self, name: str, msg: CompressedImage) -> None:
         self.update_image(name, bytes(msg.data), ros_time_to_sec(msg.header.stamp), compressed=True)
@@ -233,8 +261,16 @@ class VLACollectNode(Node):
                 self.latest_arm_status_error = [errors[joint_id] for joint_id in self.arm_joint_ids]
 
     def on_joint_state(self, name: str, msg: JointState) -> None:
-        positions = [float(item) for item in msg.position]
-        names = list(msg.name)
+        positions = self.slice_joint_positions(name, msg.position)
+        names = self.slice_joint_names(name, msg.name)
+        self.update_terminal_state(name, positions, names)
+
+    def on_uint16_terminal(self, name: str, msg: UInt16) -> None:
+        """把 UInt16 夹爪开合量保存为 1 维 position。"""
+        self.update_terminal_state(name, [float(msg.data)], [name])
+
+    def update_terminal_state(self, name: str, positions: List[float], names: List[str]) -> None:
+        """更新末端执行器最新缓存和关节名元信息。"""
         with self.lock:
             if name == "left_hand_cmd":
                 self.latest_left_hand_cmd = positions
@@ -248,6 +284,82 @@ class VLACollectNode(Node):
             elif name == "right_hand_state":
                 self.latest_right_hand_state = positions
                 self.histories["right_hand_state_names_latest"] = names
+
+    def on_button_state(self, msg: JointState) -> None:
+        """把外部按钮映射到开始/停止采集，使用按下边沿触发。"""
+        positions = [float(item) for item in msg.position]
+        names = [str(item) for item in msg.name]
+        events = []
+        if self.button_is_pressed("start", self.args.start_button_name, self.args.start_button_index, names, positions):
+            events.append("start")
+        if self.button_is_pressed("stop", self.args.stop_button_name, self.args.stop_button_index, names, positions):
+            events.append("stop")
+
+        for event in events:
+            if not self.button_edge_triggered(event):
+                continue
+            if event == "start":
+                self.get_logger().info("检测到开始按钮，执行开始录制。")
+                self.start_recording()
+            elif event == "stop":
+                self.get_logger().info("检测到停止按钮，执行停止录制。")
+                self.stop_recording()
+
+    def button_is_pressed(self, key: str, name: str, index: int, names: List[str], positions: List[float]) -> bool:
+        """按名称优先、索引兜底判断按钮是否按下。"""
+        value: Optional[float] = None
+        if name and name in names:
+            button_index = names.index(name)
+            if button_index < len(positions):
+                value = positions[button_index]
+        elif 0 <= index < len(positions):
+            value = positions[index]
+
+        if value is None:
+            self.button_pressed_state[key] = False
+            return False
+        if self.args.button_active_low:
+            pressed = value <= self.args.button_pressed_threshold
+        else:
+            pressed = value >= self.args.button_pressed_threshold
+        previous = self.button_pressed_state.get(key, False)
+        self.button_pressed_state[key] = pressed
+        return pressed and not previous
+
+    def button_edge_triggered(self, key: str) -> bool:
+        """按钮消抖，避免高频话题在一次按压里重复触发。"""
+        now = time.time()
+        last = self.last_button_trigger_sec.get(key, 0.0)
+        if now - last < self.args.button_debounce_sec:
+            return False
+        self.last_button_trigger_sec[key] = now
+        return True
+
+    def slice_joint_positions(self, name: str, positions: Sequence[float]) -> List[float]:
+        """按配置截取末端自由度；0 表示保存消息中的全部 position。"""
+        dof = self.get_terminal_dof(name)
+        values = [float(item) for item in positions]
+        if dof <= 0:
+            return values
+        return values[:dof]
+
+    def slice_joint_names(self, name: str, names: Sequence[str]) -> List[str]:
+        """按配置截取末端关节名，保证元信息与 position 维度一致。"""
+        dof = self.get_terminal_dof(name)
+        values = [str(item) for item in names]
+        if dof <= 0:
+            return values
+        return values[:dof]
+
+    def get_terminal_dof(self, name: str) -> int:
+        """查询某个末端通道需要保存的自由度数。"""
+        dof_by_name = {
+            "left_hand_cmd": self.args.left_hand_dof,
+            "left_hand_state": self.args.left_hand_dof,
+            "right_hand_cmd": self.args.right_hand_dof,
+            "right_hand_state": self.args.right_hand_dof,
+        }
+        return int(dof_by_name.get(name, 0))
 
     def terminal_listener(self) -> None:
         print("\n" + "=" * 40)
@@ -344,6 +456,7 @@ class VLACollectNode(Node):
         self._reset_histories()
         self.pending_start = False
         self.pending_start_sec = 0.0
+        self.last_checkpoint_sec = 0.0
         self.is_recording = True
         print(f"\n开始采集... (帧率: {self.args.target_hz:.1f}Hz, 目录: {self.current_dir})")
 
@@ -410,11 +523,27 @@ class VLACollectNode(Node):
         for name, data in images.items():
             (current_dir / name / f"{index:06d}.png").write_bytes(data)
 
+        self.maybe_write_checkpoint(current_dir)
+
         sys.stdout.write(
             f"\r采集进度: {index} 帧 | Head: ✓ | LeftHand: ✓ | RightHand: ✓ | "
             f"Cmd/State: ✓ | 复用最新缓存"
         )
         sys.stdout.flush()
+
+    def maybe_write_checkpoint(self, current_dir: Path) -> None:
+        """录制中定期写 arm.npz，降低异常退出时只剩图像的风险。"""
+        if self.args.checkpoint_interval_sec <= 0.0:
+            return
+        now = time.time()
+        with self.lock:
+            if not self.is_recording or self.current_dir != current_dir:
+                return
+            if now - self.last_checkpoint_sec < self.args.checkpoint_interval_sec:
+                return
+            self.last_checkpoint_sec = now
+            histories = {key: value for key, value in self.histories.items()}
+        self.write_arm_npz(current_dir, histories)
 
     def build_state_snapshot(self) -> Dict[str, Any]:
         """复制当前最新状态，供 20Hz 保存循环写入历史。"""
@@ -444,12 +573,12 @@ class VLACollectNode(Node):
     def write_arm_npz(self, session_dir: Path, histories: Dict[str, List[Any]]) -> None:
         """按旧项目方式在每组目录下保存 arm.npz。"""
         arrays: Dict[str, np.ndarray] = {
-            "cmd_positions": np.asarray(histories.get("cmd_positions", []), dtype=np.float64),
-            "status_positions": np.asarray(histories.get("status_positions", []), dtype=np.float64),
-            "left_hand_cmd_positions": np.asarray(histories.get("left_hand_cmd_positions", []), dtype=np.float64),
-            "right_hand_cmd_positions": np.asarray(histories.get("right_hand_cmd_positions", []), dtype=np.float64),
-            "left_hand_state_positions": np.asarray(histories.get("left_hand_state_positions", []), dtype=np.float64),
-            "right_hand_state_positions": np.asarray(histories.get("right_hand_state_positions", []), dtype=np.float64),
+            "cmd_positions": self.rows_to_float_array(histories.get("cmd_positions", []), fallback_width=len(self.arm_joint_ids)),
+            "status_positions": self.rows_to_float_array(histories.get("status_positions", []), fallback_width=len(self.arm_joint_ids)),
+            "left_hand_cmd_positions": self.rows_to_float_array(histories.get("left_hand_cmd_positions", []), fallback_width=self.terminal_width("left_hand_cmd")),
+            "right_hand_cmd_positions": self.rows_to_float_array(histories.get("right_hand_cmd_positions", []), fallback_width=self.terminal_width("right_hand_cmd")),
+            "left_hand_state_positions": self.rows_to_float_array(histories.get("left_hand_state_positions", []), fallback_width=self.terminal_width("left_hand_state")),
+            "right_hand_state_positions": self.rows_to_float_array(histories.get("right_hand_state_positions", []), fallback_width=self.terminal_width("right_hand_state")),
             "joint_ids": np.asarray(self.arm_joint_ids, dtype=np.int32),
             "left_arm_joint_ids": np.asarray(self.left_arm_joint_ids, dtype=np.int32),
             "right_arm_joint_ids": np.asarray(self.right_arm_joint_ids, dtype=np.int32),
@@ -467,15 +596,68 @@ class VLACollectNode(Node):
             arrays[key] = np.asarray(histories.get(key, []), dtype=str)
         np.savez(session_dir / "arm.npz", **arrays)
 
+    def terminal_width(self, name: str) -> int:
+        """返回末端执行器字段期望宽度；没有订阅 command 时允许为空数组。"""
+        topic_by_name = {
+            "left_hand_cmd": self.args.left_hand_cmd_topic,
+            "right_hand_cmd": self.args.right_hand_cmd_topic,
+            "left_hand_state": self.args.left_hand_state_topic,
+            "right_hand_state": self.args.right_hand_state_topic,
+        }
+        if not topic_by_name.get(name):
+            return 0
+        return max(0, self.get_terminal_dof(name))
+
+    def rows_to_float_array(self, rows: Sequence[Any], fallback_width: int = 0) -> np.ndarray:
+        """把可能短暂缺失的行整理为稳定二维数组。
+
+        夹爪 command 可能在录制开始后才第一次到达；这里用最近有效值前后填充，
+        保持 arm.npz 形状稳定，避免一次短暂缺失破坏整组数据。
+        """
+        row_values: List[List[float]] = []
+        max_width = max(0, int(fallback_width))
+        for row in rows:
+            values = [float(item) for item in row]
+            row_values.append(values)
+            max_width = max(max_width, len(values))
+        if not row_values:
+            return np.empty((0, max_width), dtype=np.float64)
+        if max_width == 0:
+            return np.empty((len(row_values), 0), dtype=np.float64)
+
+        array = np.full((len(row_values), max_width), np.nan, dtype=np.float64)
+        for index, values in enumerate(row_values):
+            if values:
+                width = min(len(values), max_width)
+                array[index, :width] = values[:width]
+
+        valid_rows = np.where(~np.isnan(array).all(axis=1))[0]
+        if valid_rows.size == 0:
+            return array
+
+        first_valid = int(valid_rows[0])
+        array[:first_valid] = array[first_valid]
+        last_valid = array[first_valid].copy()
+        for index in range(first_valid + 1, len(array)):
+            if np.isnan(array[index]).all():
+                array[index] = last_valid
+            else:
+                nan_mask = np.isnan(array[index])
+                array[index, nan_mask] = last_valid[nan_mask]
+                last_valid = array[index].copy()
+        return array
+
     def missing_streams(self) -> List[str]:
         """返回尚未收到最新缓存的数据源。"""
         missing = [name for name, value in self.latest_images.items() if value is None]
         checks = {
             "arm_cmd": self.latest_arm_cmd,
             "arm_status": self.latest_arm_status,
-            "left_hand_state": self.latest_left_hand_state,
-            "right_hand_state": self.latest_right_hand_state,
         }
+        if self.args.left_hand_state_topic:
+            checks["left_hand_state"] = self.latest_left_hand_state
+        if self.args.right_hand_state_topic:
+            checks["right_hand_state"] = self.latest_right_hand_state
         missing.extend(name for name, value in checks.items() if value is None)
         return missing
 
@@ -519,6 +701,16 @@ def parse_named_topic(value: str) -> Tuple[str, str]:
 def build_arg_parser(
     description: str = "天工 VLA 固定频率数据采集脚本",
     default_output_dir: str = "/home/ubuntu/cbc_tienkung2.0_vla_collect_data/vla_recorded_data",
+    default_left_hand_cmd_topic: str = "/inspire_hand/ctrl/left_hand",
+    default_right_hand_cmd_topic: str = "/inspire_hand/ctrl/right_hand",
+    default_left_hand_state_topic: str = "/inspire_hand/state/left_hand",
+    default_right_hand_state_topic: str = "/inspire_hand/state/right_hand",
+    default_left_hand_cmd_type: str = "joint_state",
+    default_right_hand_cmd_type: str = "joint_state",
+    default_left_hand_state_type: str = "joint_state",
+    default_right_hand_state_type: str = "joint_state",
+    default_left_hand_dof: int = 0,
+    default_right_hand_dof: int = 0,
 ) -> argparse.ArgumentParser:
     """构建采集参数。"""
     parser = argparse.ArgumentParser(description=description)
@@ -533,10 +725,25 @@ def build_arg_parser(
     parser.add_argument("--right-hand-image-type", choices=["compressed_image", "compressed_video", "raw_image"], default="compressed_video", help="右手相机图像消息类型")
     parser.add_argument("--arm-cmd-topic", default="/arm/cmd_ctrl", help="机械臂 command 话题")
     parser.add_argument("--arm-status-topic", default="/arm/status", help="机械臂 state 话题")
-    parser.add_argument("--left-hand-cmd-topic", default="/inspire_hand/ctrl/left_hand", help="左灵巧手 command 话题")
-    parser.add_argument("--right-hand-cmd-topic", default="/inspire_hand/ctrl/right_hand", help="右灵巧手 command 话题")
-    parser.add_argument("--left-hand-state-topic", default="/inspire_hand/state/left_hand", help="左灵巧手 state 话题")
-    parser.add_argument("--right-hand-state-topic", default="/inspire_hand/state/right_hand", help="右灵巧手 state 话题")
+    parser.add_argument("--left-hand-cmd-topic", default=default_left_hand_cmd_topic, help="左手/左夹爪 command 话题；为空则不订阅")
+    parser.add_argument("--right-hand-cmd-topic", default=default_right_hand_cmd_topic, help="右手/右夹爪 command 话题；为空则不订阅")
+    parser.add_argument("--left-hand-state-topic", default=default_left_hand_state_topic, help="左手/左夹爪 state 话题；为空则不订阅且不作为启动必需流")
+    parser.add_argument("--right-hand-state-topic", default=default_right_hand_state_topic, help="右手/右夹爪 state 话题；为空则不订阅且不作为启动必需流")
+    parser.add_argument("--left-hand-cmd-type", choices=["joint_state", "uint16"], default=default_left_hand_cmd_type, help="左手/左夹爪 command 消息类型")
+    parser.add_argument("--right-hand-cmd-type", choices=["joint_state", "uint16"], default=default_right_hand_cmd_type, help="右手/右夹爪 command 消息类型")
+    parser.add_argument("--left-hand-state-type", choices=["joint_state", "uint16"], default=default_left_hand_state_type, help="左手/左夹爪 state 消息类型")
+    parser.add_argument("--right-hand-state-type", choices=["joint_state", "uint16"], default=default_right_hand_state_type, help="右手/右夹爪 state 消息类型")
+    parser.add_argument("--left-hand-dof", type=int, default=default_left_hand_dof, help="左手/左夹爪保存的 position 自由度数；0 表示保存全部")
+    parser.add_argument("--right-hand-dof", type=int, default=default_right_hand_dof, help="右手/右夹爪保存的 position 自由度数；0 表示保存全部")
+    parser.add_argument("--button-topic", default="", help="外部按钮 JointState 话题；为空表示禁用按钮控制")
+    parser.add_argument("--start-button-name", default="left_button", help="开始录制按钮名，优先按 name 匹配")
+    parser.add_argument("--stop-button-name", default="right_button", help="停止录制按钮名，优先按 name 匹配")
+    parser.add_argument("--start-button-index", type=int, default=0, help="开始录制按钮索引，按钮名不存在时使用")
+    parser.add_argument("--stop-button-index", type=int, default=1, help="停止录制按钮索引，按钮名不存在时使用")
+    parser.add_argument("--button-pressed-threshold", type=float, default=0.5, help="按钮按下阈值")
+    parser.add_argument("--button-active-low", action=argparse.BooleanOptionalAction, default=True, help="按钮低电平按下；当前设备未按下为 1.0，默认启用")
+    parser.add_argument("--button-debounce-sec", type=float, default=0.8, help="按钮触发消抖秒数")
+    parser.add_argument("--checkpoint-interval-sec", type=float, default=1.0, help="录制中定期写 arm.npz 的间隔；小于等于 0 表示关闭")
     parser.add_argument("--auto-recover-streams", action=argparse.BooleanOptionalAction, default=True, help="等待启动时自动恢复缺失的相机流")
     parser.add_argument("--recover-after-sec", type=float, default=8.0, help="等待启动超过该秒数仍缺相机流时才自动恢复")
     parser.add_argument("--recover-interval-sec", type=float, default=20.0, help="自动恢复相机流的最小间隔秒数")

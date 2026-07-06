@@ -50,10 +50,15 @@ source /home/ubuntu/ros2ws/install/setup.bash
 10. 终端输入 `1` 后，如果必需数据流尚未就绪，采集器会进入自动等待；等三路图像、机械臂 command/state 和左右手 state 都到齐后自动开始录制。缺 `head`、`hand_left`、`hand_right` 并超过宽限时间时会低频调用 `scripts/recover_vla_streams.sh` 自动恢复相机流；输入 `2` 可以取消等待或停止并保存当前录制。
 11. 采集输出必须贴旧项目格式：每组目录只有 `head/`、`hand_left/`、`hand_right/` 三路 PNG 序列和一个 `arm.npz`。不要再写 `samples.jsonl`、`summary.json`、`config.json` 或逐帧 `state_npz/`。
 12. `arm.npz` 至少保存机械臂 `cmd_positions`、`status_positions`、关节 id、左右手 state；左右手 command 也订阅并保存，如果当前话题不发布新消息，则保存为空数组，不伪造 command。
-13. 图像保存必须参考旧 VLA 实现：解码后直接保存 PNG，默认保持相机输出尺寸，不在采集脚本里 resize。相机启动阶段可以降低分辨率以减少带宽和磁盘；当前头部 Orbbec 为 `640x480x30`，左右 D405 为 `424x240x30`。
+13. 图像保存必须参考旧 VLA 实现：解码后直接保存 PNG，默认保持相机输出尺寸，不在采集脚本里 resize。相机启动阶段可以降低分辨率以减少带宽和磁盘；加爪采集当前要求相机节点直接输出宽高均不小于 `448` 且尽量接近 `448x448` 的尺寸，当前稳定配置为头部 Orbbec `640x480x30`、左右 D405 `640x480x30`。
 14. 各主机时钟可能不同步，不要依赖跨主机 ROS stamp 做强对齐；如需检查复用和新鲜度，使用采集器写入的接收时间和图像 seq。
-15. 稳定采集优先使用采集 AGX tmpfs 方案：上位机先运行 `bash scripts/start_vla_nodes.sh --no-move-head` 启动相机和头部状态；采集 AGX 项目持久目录为 `/home/nvidia/cbc_tienkung2.0_vla_collect_data`，运行 `bash scripts/n2_dual_hands_collect.sh --target-hz 20` 采集；数据默认写入 `/dev/shm/cbc_tienkung2.0_vla_collect_data/vla_recorded_data/dual_hands`，采完运行 `bash scripts/upload_n2_recorded_data.sh` 上传到上位机 `dual_hands/` 并删除采集 AGX 本地数据。
+15. 双手稳定采集仍可使用采集 AGX tmpfs 方案：上位机先运行 `bash scripts/start_vla_nodes.sh --no-move-head` 启动相机和头部状态；采集 AGX 项目持久目录为 `/home/nvidia/cbc_tienkung2.0_vla_collect_data`，运行 `bash scripts/n2_dual_hands_collect.sh --target-hz 20` 采集；数据默认写入 `/dev/shm/cbc_tienkung2.0_vla_collect_data/vla_recorded_data/dual_hands`，采完运行 `bash scripts/upload_n2_recorded_data.sh` 上传到上位机 `dual_hands/` 并删除采集 AGX 本地数据。加爪采集默认写入 n2 持久目录 `/home/nvidia/cbc_tienkung2.0_vla_collect_data/vla_recorded_data/gripper`，采完运行 `bash scripts/upload_n2_gripper_recorded_data.sh` 同步到上位机 `gripper/`。
 16. `assets/` 目录保存天工 2.0 PRO 搭配因时 6 自由度灵巧手使用的 D405 手部相机支架资料，包括安装参考图、D405 USB 连接示意和 STL 模型；安装后确认两颗 M3 螺丝、运动包络和线缆余量。
+
+### VLA 数据中转备份
+
+- 加爪数据需要先转成 LeRobot 数据集再放 NAS 时，在上位机运行 `bash scripts/cbc_gripper_lerobot_to_nas.sh`；脚本提示输入 NAS 下的数据集文件夹名，默认 NAS 目标主机为 `192.168.41.6`，原始数据默认读取 `/home/ubuntu/cbc_tienkung2.0_vla_collect_data/vla_recorded_data/gripper`，LeRobot 临时目录传完后删除，NAS 目标为 `/volume1/data/caobochun/<文件夹名>`，不删除原始采集数据。
+- 需要从 NAS 再传到 A100_8 时，在上位机运行 `bash scripts/cbc_nas_lerobot_to_a100.sh <文件夹名>`；默认 NAS 目标主机为 `192.168.41.6`，源为 NAS `/volume1/data/caobochun/<文件夹名>`，目标为 A100_8 `/data/caobochun/<文件夹名>`。
 
 ### 相机与话题检查
 

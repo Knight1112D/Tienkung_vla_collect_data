@@ -4,6 +4,9 @@
 
 ## 文件说明
 
+- `full_system.jpg`：天工 2.0 PRO VLA 整体采集系统预览图。
+- `robot.jpg`：天工 2.0 PRO 机器人本体照片。
+- `6dof_hands.jpg`：因时 6 自由度灵巧手和六维力传感器照片。
 - `camera_holder_dual_hands_l.jpg`：左手侧支架安装参考图。
 - `camera_holder_dual_hands_r.jpg`：右手侧支架安装参考图。
 - `d405_usb.jpg`：D405 通过 USB 连接到 AGX 的示意图。
